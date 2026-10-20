@@ -12,9 +12,9 @@ import { createClient, readSession } from './client.js';
 // stdout belongs to the MCP protocol; route any stray logging to stderr.
 console.log = console.info = console.debug = (...a) => console.error(...a);
 
-const ALLOW_WRITE = process.env.TELEGRAM_MCP_ALLOW_WRITE === 'true';
-const DOWNLOAD_DIR = process.env.TELEGRAM_MCP_DOWNLOAD_DIR || path.join(os.homedir(), 'Downloads', 'telegram-mcp');
-const MAX_OUTPUT_CHARS = Number(process.env.TELEGRAM_MCP_MAX_CHARS || 120_000);
+const ALLOW_WRITE = process.env.TELEGRAMCP_ALLOW_WRITE === 'true';
+const DOWNLOAD_DIR = process.env.TELEGRAMCP_DOWNLOAD_DIR || path.join(os.homedir(), 'Downloads', 'telegramcp');
+const MAX_OUTPUT_CHARS = Number(process.env.TELEGRAMCP_MAX_CHARS || 120_000);
 const DIALOG_TTL_MS = 60_000;
 
 // ---------- connection & caches ----------
@@ -188,7 +188,7 @@ async function fetchMessages(entity, { limit, offsetId, fromDate, toDate: to, se
 // ---------- server & tools ----------
 
 const server = new McpServer(
-  { name: 'telegram', version: '1.0.0' },
+  { name: 'telegramcp', version: '1.0.0' },
   {
     instructions:
       'Access to the user\'s personal Telegram account (private chats, groups, channels, forums). ' +

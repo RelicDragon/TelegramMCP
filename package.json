@@ -4,8 +4,7 @@
   "description": "MCP server that gives your AI agents (Claude Code, Codex, Cursor, …) access to your personal Telegram account",
   "type": "module",
   "bin": {
-    "telegramcp": "src/cli.js",
-    "telegram-mcp": "src/cli.js"
+    "telegramcp": "src/cli.js"
   },
   "main": "src/server.js",
   "files": [

@@ -15,7 +15,7 @@ import {
 import { Cancelled, answer, loginInteractive, currentUser, logout, sendCode, verify } from './auth.js';
 
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-const INSTALL_SPEC = process.env.TELEGRAM_MCP_SPEC || pkg.config?.installSpec || pkg.name;
+const INSTALL_SPEC = process.env.TELEGRAMCP_SPEC || pkg.config?.installSpec || pkg.name;
 const CWD = process.env.INIT_CWD || process.cwd(); // npm scripts chdir to the package; INIT_CWD is where the user ran it
 const isGitCheckout = fs.existsSync(path.join(ROOT, '.git'));
 const isNpxCache = ROOT.split(path.sep).includes('_npx');
@@ -97,7 +97,7 @@ async function registerInteractive({ scope: presetScope } = {}) {
   const last = (state.lastSelected ?? []).filter((id) => agents[id]);
 
   const mode = answer(await p.select({
-    message: 'Where should the Telegram MCP be available?',
+    message: 'Where should telegramcp be available?',
     options: [
       ...(last.length ? [{ value: 'last', label: 'Same as last time', hint: last.map((id) => agents[id].name).join(', ') }] : []),
       { value: 'detected', label: 'All detected agents', hint: [...detected].map((id) => agents[id].name).join(', ') || 'none found' },
@@ -159,7 +159,7 @@ async function unregisterInteractive({ scope = 'global' }) {
   const regs = Object.keys(agents).filter((id) => isRegistered(id, supportsScope(id, scope) ? scope : 'global', CWD));
   if (!regs.length) return p.log.info(`Not registered anywhere (${scope} scope).`);
   const ids = answer(await p.multiselect({
-    message: 'Remove the Telegram MCP from',
+    message: 'Remove telegramcp from',
     options: regs.map((id) => ({ value: id, label: agents[id].name, hint: shortPath(configPath(id, scope, CWD)) })),
     required: true,
   }));
@@ -238,7 +238,7 @@ async function setup() {
   p.log.step(pc.bold('2. Register in your AI agents'));
   await registerInteractive();
   p.note(
-    `Restart your AI clients to pick up the ${pc.cyan('telegram')} server.\n` +
+    `Restart your AI clients to pick up the ${pc.cyan('telegramcp')} server.\n` +
     `Later: ${pc.cyan('telegramcp register')} to add/remove agents, ${pc.cyan('telegramcp update')} to update.`,
     'Done',
   );

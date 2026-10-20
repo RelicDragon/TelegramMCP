@@ -8,7 +8,7 @@ import * as jsonc from 'jsonc-parser';
 import YAML from 'yaml';
 import { ROOT, readState, writeState } from './client.js';
 
-export const SERVER_NAME = 'telegram';
+export const SERVER_NAME = 'telegramcp';
 
 const home = os.homedir();
 const xdgConfig = process.env.XDG_CONFIG_HOME || path.join(home, '.config');

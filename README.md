@@ -65,15 +65,15 @@ and the previous file is kept as `<file>.bak`. Paths follow [add-mcp](https://gi
 Any other MCP client: run `telegramcp` with no arguments (stdio), or
 
 ```json
-{ "mcpServers": { "telegram": { "command": "telegramcp" } } }
+{ "mcpServers": { "telegramcp": { "command": "telegramcp" } } }
 ```
 
 ## Where things live
 
-- Credentials and session: `~/.config/telegram-mcp/` (`%APPDATA%\telegram-mcp` on Windows; override with `TELEGRAM_MCP_HOME`).
+- Credentials and session: `~/.config/telegramcp/` (`%APPDATA%\telegramcp` on Windows; override with `TELEGRAMCP_HOME`).
   It holds `.env` (API_ID, API_HASH, PHONE_NUMBER), `session.txt` and `state.json` (where the server is registered).
   This is outside the install dir, so updates and reinstalls don't log you out.
-- **One session per machine.** Each install shows up in Telegram → Settings → Devices as `Telegram MCP (<hostname>)`.
+- **One session per machine.** Each install shows up in Telegram → Settings → Devices as `telegramcp (<hostname>)`.
   Don't copy `session.txt` between machines: using one auth key from two places at once can get it revoked (`AUTH_KEY_DUPLICATED`).
 
 ## Tools exposed to the agent
@@ -82,11 +82,11 @@ Read-only: `get_me`, `list_chats`, `get_chat`, `read_messages`, `search_messages
 `get_message_context`, `get_unread`, `list_topics`, `list_participants`, `list_contacts`, `download_media`.
 Reading never marks messages as read.
 
-With `TELEGRAM_MCP_ALLOW_WRITE=true` (in the data-dir `.env`): `send_message`, `mark_read`.
+With `TELEGRAMCP_ALLOW_WRITE=true` (in the data-dir `.env`): `send_message`, `mark_read`.
 
 Chats can be referenced by id, `@username`, t.me link, `me` (Saved Messages), or a title substring.
 
-Other env: `TELEGRAM_MCP_DOWNLOAD_DIR` (default `~/Downloads/telegram-mcp`), `TELEGRAM_MCP_MAX_CHARS`, `TZ`,
+Other env: `TELEGRAMCP_DOWNLOAD_DIR` (default `~/Downloads/telegramcp`), `TELEGRAMCP_MAX_CHARS`, `TZ`,
 `TG_SESSION` (inject the session via env), `TG_DEVICE_NAME`, `TG_PASSWORD`.
 
 ## Development

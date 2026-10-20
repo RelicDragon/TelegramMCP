@@ -143,7 +143,7 @@ export async function loginInteractive({ method, force = false } = {}) {
   }
   const me = await finish(client);
   p.log.success(`Logged in as ${pc.cyan(describe(me))}. Session saved to ${pc.dim(SESSION_FILE)}`);
-  p.log.info(pc.dim(`This machine appears in Telegram → Settings → Devices as "${process.env.TG_DEVICE_NAME || 'Telegram MCP (hostname)'}".`));
+  p.log.info(pc.dim(`This machine appears in Telegram → Settings → Devices as "${process.env.TG_DEVICE_NAME || 'telegramcp (hostname)'}".`));
   return me;
 }
 

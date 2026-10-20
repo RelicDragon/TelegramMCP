@@ -10,20 +10,13 @@ import { Logger, LogLevel } from 'telegram/extensions/Logger.js';
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // Credentials and session live outside the install dir so updates / reinstalls never wipe them.
-export const DATA_DIR = process.env.TELEGRAM_MCP_HOME || (process.platform === 'win32'
-  ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'telegram-mcp')
-  : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'telegram-mcp'));
+export const DATA_DIR = process.env.TELEGRAMCP_HOME || (process.platform === 'win32'
+  ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'telegramcp')
+  : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'telegramcp'));
 export const ENV_FILE = path.join(DATA_DIR, '.env');
 export const STATE_FILE = path.join(DATA_DIR, 'state.json');
 
 fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
-
-// One-time migration from the old layout (.env / session.txt inside the checkout).
-for (const name of ['.env', 'session.txt']) {
-  const legacy = path.join(ROOT, name);
-  const target = path.join(DATA_DIR, name);
-  if (fs.existsSync(legacy) && !fs.existsSync(target)) fs.copyFileSync(legacy, target);
-}
 
 dotenv.config({ path: ENV_FILE, quiet: true });
 
@@ -76,7 +69,7 @@ export function createClient(session = readSession()) {
   return new TelegramClient(new StringSession(session), apiId, apiHash, {
     connectionRetries: 5,
     baseLogger: new Logger(LogLevel.ERROR),
-    deviceModel: process.env.TG_DEVICE_NAME || `Telegram MCP (${os.hostname()})`,
+    deviceModel: process.env.TG_DEVICE_NAME || `telegramcp (${os.hostname()})`,
     appVersion: '1.0.0',
   });
 }
