@@ -36,7 +36,7 @@ Restart your AI clients afterwards.
 | `telegramcp unregister zed -y` | Remove from given agents (no args → interactive) |
 | `telegramcp list` | Supported agents, what's detected, where it's registered |
 | `telegramcp status` | Logged-in account, registrations, install & data paths |
-| `telegramcp update` | Update to the latest version, then **refresh paths** in every registered client |
+| `telegramcp update [--force]` | Show current → latest version, update only if newer, then **refresh paths** in every registered client |
 | `telegramcp refresh` | Rewrite registered paths only (after moving the install or switching Node versions, e.g. with nvm) |
 | `telegramcp login [--qr \| --code] [--force]` | Log in again |
 | `telegramcp logout` | Revoke this machine's session |

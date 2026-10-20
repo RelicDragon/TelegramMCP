@@ -41,7 +41,7 @@ ${pc.bold('Usage')}
   telegramcp unregister [agent...] [--all] [--scope ...] [-y]
   telegramcp list                    all supported agents, detection and registration state
   telegramcp refresh                 rewrite registered paths (after moving the install or changing Node)
-  telegramcp update                  update to the latest version, then refresh
+  telegramcp update [--force]        update if a newer version exists, then refresh
   telegramcp send-code | verify <code> [2fa]   non-interactive login
   telegramcp serve                   run the MCP server on stdio
 
@@ -263,16 +263,45 @@ function linkUserBin() {
   p.log.info(`Command: ${shortPath(link)}${onPath ? '' : pc.yellow(` — add ${shortPath(binDir)} to your PATH to use \`${pkg.name}\` directly`)}`);
 }
 
-function update() {
+// Numeric x.y.z comparison; pre-release suffixes are ignored.
+function newer(a, b) {
+  const parse = (v) => String(v).split('-')[0].split('.').map(Number);
+  const [x, y] = [parse(a), parse(b)];
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+}
+
+function update({ force = false } = {}) {
   let cli = path.join(ROOT, 'src', 'cli.js');
+  let updated = false;
   if (isGitCheckout) {
-    p.log.step(`Updating git checkout ${shortPath(ROOT)}`);
-    run('git', ['-C', ROOT, 'pull', '--ff-only']);
-    run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: ROOT });
+    const s = p.spinner();
+    s.start('Checking for updates');
+    capture('git', ['-C', ROOT, 'fetch', '--quiet']);
+    const behind = Number(capture('git', ['-C', ROOT, 'rev-list', '--count', 'HEAD..@{u}'])) || 0;
+    let remote = '';
+    try { remote = JSON.parse(capture('git', ['-C', ROOT, 'show', '@{u}:package.json'])).version; } catch {}
+    s.stop(`Current ${pc.cyan(`v${pkg.version}`)} · upstream ${pc.cyan(remote ? `v${remote}` : '?')}` +
+      (behind ? pc.dim(` (${behind} new commit${behind > 1 ? 's' : ''})`) : ''));
+    if (behind || force) {
+      p.log.step(`Updating git checkout ${shortPath(ROOT)}`);
+      run('git', ['-C', ROOT, 'pull', '--ff-only']);
+      run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: ROOT });
+      updated = true;
+    }
   } else {
-    cli = installStable({ preferUser: isUserInstall });
+    const s = p.spinner();
+    s.start('Checking for updates');
+    const latest = capture('npm', ['view', spec, 'version', '--loglevel=error']).split('\n').pop().replace(/'/g, '').trim();
+    s.stop(`Current ${pc.cyan(`v${pkg.version}`)} · latest ${pc.cyan(latest ? `v${latest}` : '?')}`);
+    if (force || !latest || newer(latest, pkg.version)) {
+      if (!latest) p.log.warn('Could not determine the latest version; reinstalling.');
+      cli = installStable({ preferUser: isUserInstall });
+      updated = true;
+    }
   }
-  // Refresh with the freshly installed code (paths may have changed).
+  if (!updated) p.log.success(`Already up to date ${pc.dim('(--force to reinstall)')}`);
+  // Refresh with the installed code (paths may have changed, e.g. after switching Node versions).
   p.log.step('Refreshing registered paths');
   run(process.execPath, [cli, 'refresh', '--quiet']);
 }
@@ -366,7 +395,7 @@ async function main() {
       else await unregisterInteractive({ scope });
       break;
     case 'refresh': refresh(); break;
-    case 'update': update(); break;
+    case 'update': update({ force: o.force }); break;
     case 'send-code': p.log.success(`Code sent via ${await sendCode()}. Then: telegramcp verify <code> [2fa-password]`); break;
     case 'verify': p.log.success(`Logged in as ${await verify(rest[0], rest[1])}`); break;
     default: throw new Error(`Unknown command "${cmd}". Run \`telegramcp --help\`.`);
