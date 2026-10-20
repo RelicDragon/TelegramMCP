@@ -2,6 +2,7 @@
 // telegramcp — installer / manager CLI. With no arguments and a piped stdin it runs the MCP server,
 // so MCP clients can launch `telegramcp` directly; in a terminal it opens an interactive menu.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { spawnSync } from 'node:child_process';
@@ -19,6 +20,11 @@ const INSTALL_SPEC = process.env.TELEGRAMCP_SPEC || pkg.config?.installSpec || p
 const CWD = process.env.INIT_CWD || process.cwd(); // npm scripts chdir to the package; INIT_CWD is where the user ran it
 const isGitCheckout = fs.existsSync(path.join(ROOT, '.git'));
 const isNpxCache = ROOT.split(path.sep).includes('_npx');
+// Fallback install location when npm's global prefix isn't writable (e.g. /usr without sudo).
+const USER_PREFIX = process.env.TELEGRAMCP_PREFIX || (process.platform === 'win32'
+  ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'telegramcp')
+  : path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'telegramcp'));
+const isUserInstall = ROOT === path.join(USER_PREFIX, 'node_modules', pkg.name);
 
 const HELP = `${pc.bold('telegramcp')} ${pc.dim(`v${pkg.version}`)} — Telegram account MCP server
 
@@ -206,28 +212,78 @@ function run(cmd, args, opts = {}) {
   if (res.status !== 0) throw new Error(`${cmd} ${args.join(' ')} failed`);
 }
 
+function capture(cmd, args) {
+  const res = spawnSync(cmd, args, { encoding: 'utf8', shell: process.platform === 'win32' });
+  return res.status === 0 ? res.stdout.trim() : '';
+}
+
+// Nearest existing ancestor decides whether we could create the dir.
+function writable(dir) {
+  for (let d = dir; ; d = path.dirname(d)) {
+    if (fs.existsSync(d)) {
+      try { fs.accessSync(d, fs.constants.W_OK); return true; } catch { return false; }
+    }
+    if (d === path.dirname(d)) return false;
+  }
+}
+
+const spec = /^[a-z0-9@][\w./-]*$/i.test(INSTALL_SPEC) && !INSTALL_SPEC.includes(':') && !INSTALL_SPEC.slice(1).includes('@')
+  ? `${INSTALL_SPEC}@latest` : INSTALL_SPEC;
+
+// Installs to npm's global prefix when it's writable, otherwise to a user-owned prefix
+// (~/.local/share/telegramcp) with a ~/.local/bin/telegramcp link, so sudo is never needed.
+// Returns the installed cli.js path.
+function installStable({ preferUser = false } = {}) {
+  const globalRoot = capture('npm', ['root', '-g']);
+  if (!preferUser && globalRoot && writable(globalRoot)) {
+    p.log.step(`npm install -g ${spec}`);
+    run('npm', ['install', '-g', spec, '--no-audit', '--no-fund', '--loglevel=error']);
+    return path.join(globalRoot, pkg.name, 'src', 'cli.js');
+  }
+  p.log.step(`npm install --prefix ${shortPath(USER_PREFIX)} ${spec}`);
+  fs.mkdirSync(USER_PREFIX, { recursive: true });
+  run('npm', ['install', '--prefix', USER_PREFIX, spec, '--no-audit', '--no-fund', '--no-package-lock', '--loglevel=error']);
+  const cli = path.join(USER_PREFIX, 'node_modules', pkg.name, 'src', 'cli.js');
+  linkUserBin();
+  return cli;
+}
+
+function linkUserBin() {
+  const target = path.join(USER_PREFIX, 'node_modules', '.bin', process.platform === 'win32' ? `${pkg.name}.cmd` : pkg.name);
+  if (process.platform === 'win32') {
+    p.log.info(`Command: ${target}`);
+    return;
+  }
+  const binDir = path.join(os.homedir(), '.local', 'bin');
+  const link = path.join(binDir, pkg.name);
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.rmSync(link, { force: true });
+  fs.symlinkSync(target, link);
+  const onPath = (process.env.PATH || '').split(path.delimiter).includes(binDir);
+  p.log.info(`Command: ${shortPath(link)}${onPath ? '' : pc.yellow(` — add ${shortPath(binDir)} to your PATH to use \`${pkg.name}\` directly`)}`);
+}
+
 function update() {
+  let cli = path.join(ROOT, 'src', 'cli.js');
   if (isGitCheckout) {
     p.log.step(`Updating git checkout ${shortPath(ROOT)}`);
     run('git', ['-C', ROOT, 'pull', '--ff-only']);
-    run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], { cwd: ROOT });
+    run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: ROOT });
   } else {
-    p.log.step(`npm install -g ${INSTALL_SPEC}`);
-    run('npm', ['install', '-g', INSTALL_SPEC, '--no-audit', '--no-fund']);
+    cli = installStable({ preferUser: isUserInstall });
   }
   // Refresh with the freshly installed code (paths may have changed).
   p.log.step('Refreshing registered paths');
-  run(process.execPath, [path.join(ROOT, 'src', 'cli.js'), 'refresh', '--quiet']);
+  run(process.execPath, [cli, 'refresh', '--quiet']);
 }
 
-// Running via `npx` puts the code in a disposable cache dir; install globally so clients get a stable path.
+// Running via `npx` puts the code in a disposable cache dir; install it somewhere stable first.
 function ensureStableInstall() {
   if (!isNpxCache) return false;
   p.log.warn('Running from the npx cache — AI clients need a stable install path.');
-  p.log.step(`npm install -g ${INSTALL_SPEC}`);
-  run('npm', ['install', '-g', INSTALL_SPEC, '--no-audit', '--no-fund']);
-  p.log.step('Continuing with the global install');
-  run('telegramcp', ['setup']);
+  const cli = installStable();
+  p.log.step('Continuing with the installed version');
+  run(process.execPath, [cli, 'setup', '--quiet']);
   return true;
 }
 

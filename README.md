@@ -12,7 +12,9 @@ It uses GramJS / MTProto, so the agent sees your account the way the Telegram ap
 npx -y telegramcp setup
 ```
 
-The installer installs itself globally (so your AI clients get a stable path) and starts the wizard.
+The installer first installs itself somewhere stable (your AI clients need a fixed path; the npx cache isn't one), then starts the wizard.
+It uses npm's global folder if you can write to it; otherwise (e.g. `/usr/lib/node_modules` owned by root) it installs to
+`~/.local/share/telegramcp` and links `~/.local/bin/telegramcp`. No sudo needed.
 Equivalent: `npm install -g telegramcp && telegramcp setup`. Latest from GitHub: `npm install -g github:RelicDragon/TelegramMCP`.
 
 `setup` is an interactive wizard:
