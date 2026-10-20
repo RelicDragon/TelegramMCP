@@ -1,32 +1,74 @@
 {
-  "name": "telegram-mcp",
-  "version": "1.0.0",
-  "description": "MCP server exposing your Telegram account (chats, groups, channels, messages) to LLMs",
+  "name": "@relicdragon/telegram-mcp",
+  "version": "1.1.0",
+  "description": "MCP server that gives your AI agents (Claude Code, Codex, Cursor, …) access to your personal Telegram account",
   "type": "module",
-  "main": "src/server.js",
   "bin": {
-    "telegram-mcp": "src/server.js"
+    "telegram-mcp": "src/cli.js"
   },
-  "scripts": {
-    "start": "node src/server.js",
-    "login": "node src/login.js",
-    "login:qr": "node src/login.js qr",
-    "status": "node src/login.js status",
-    "logout": "node src/login.js logout",
-    "register": "node scripts/register.js all",
-    "register:claude": "node scripts/register.js claude",
-    "register:codex": "node scripts/register.js codex",
-    "register:cursor": "node scripts/register.js cursor"
+  "main": "src/server.js",
+  "files": [
+    "src",
+    "README.md",
+    ".env.example"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RelicDragon/TelegramMCP.git"
   },
-  "license": "ISC",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.1",
-    "dotenv": "^18.0.8",
-    "qrcode-terminal": "^0.12.0",
-    "telegram": "^2.26.22",
-    "zod": "^4.6.7"
+  "config": {
+    "installSpec": "github:RelicDragon/TelegramMCP"
   },
+  "keywords": [
+    "mcp",
+    "telegram",
+    "model-context-protocol",
+    "claude",
+    "codex",
+    "cursor",
+    "gramjs"
+  ],
   "engines": {
     "node": ">=20"
+  },
+  "license": "ISC",
+  "scripts": {
+    "start": "node src/cli.js serve",
+    "setup": "node src/cli.js setup",
+    "login": "node src/cli.js login",
+    "login:qr": "node src/cli.js login --qr",
+    "logout": "node src/cli.js logout",
+    "status": "node src/cli.js status",
+    "list": "node src/cli.js list",
+    "register": "node src/cli.js register",
+    "unregister": "node src/cli.js unregister",
+    "refresh": "node src/cli.js refresh",
+    "update": "node src/cli.js update",
+    "register:claude": "node src/cli.js register claude -y",
+    "register:claude-desktop": "node src/cli.js register claude-desktop -y",
+    "register:codex": "node src/cli.js register codex -y",
+    "register:cursor": "node src/cli.js register cursor -y",
+    "register:vscode": "node src/cli.js register vscode -y",
+    "register:copilot": "node src/cli.js register copilot -y",
+    "register:gemini": "node src/cli.js register gemini -y",
+    "register:windsurf": "node src/cli.js register windsurf -y",
+    "register:antigravity": "node src/cli.js register antigravity -y",
+    "register:zed": "node src/cli.js register zed -y",
+    "register:opencode": "node src/cli.js register opencode -y",
+    "register:goose": "node src/cli.js register goose -y",
+    "register:cline": "node src/cli.js register cline -y",
+    "register:kiro": "node src/cli.js register kiro -y",
+    "register:all": "node src/cli.js register --all -y"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.8.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "dotenv": "^18.0.8",
+    "jsonc-parser": "^3.3.1",
+    "picocolors": "^1.1.1",
+    "qrcode-terminal": "^0.12.0",
+    "telegram": "^2.26.22",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
   }
 }
