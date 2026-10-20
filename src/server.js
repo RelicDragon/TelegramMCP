@@ -398,7 +398,7 @@ if (ALLOW_WRITE) {
 await server.connect(new StdioServerTransport());
 tg().catch((err) => console.error('Telegram connect failed:', err.message));
 
-const shutdown = async () => { try { await client?.disconnect(); } finally { process.exit(0); } };
+const shutdown = async () => { try { await client?.destroy(); } finally { process.exit(0); } };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 process.stdin.on('close', shutdown);

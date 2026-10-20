@@ -27,7 +27,7 @@ export async function currentUser() {
     await client.connect();
     return (await client.checkAuthorization()) ? await client.getMe() : null;
   } finally {
-    await client.disconnect().catch(() => {});
+    await client.destroy().catch(() => {});
   }
 }
 
@@ -105,7 +105,7 @@ async function finish(client) {
   writeSession(client.session.save());
   fs.rmSync(PENDING_FILE, { force: true });
   const me = await client.getMe();
-  await client.disconnect().catch(() => {});
+  await client.destroy().catch(() => {});
   return me;
 }
 
@@ -137,7 +137,7 @@ export async function loginInteractive({ method, force = false } = {}) {
   try {
     await (method === 'qr' ? loginWithQr(client) : loginWithCode(client));
   } catch (err) {
-    await client.disconnect().catch(() => {});
+    await client.destroy().catch(() => {});
     if (err.message === 'AUTH_USER_CANCEL') throw new Cancelled('Cancelled');
     throw err;
   }
@@ -152,7 +152,7 @@ export async function logout() {
     const client = createClient();
     await client.connect();
     await client.invoke(new Api.auth.LogOut()).catch(() => {});
-    await client.disconnect().catch(() => {});
+    await client.destroy().catch(() => {});
   }
   fs.rmSync(SESSION_FILE, { force: true });
 }
@@ -167,7 +167,7 @@ export async function sendCode() {
   await client.connect();
   const { phoneCodeHash, isCodeViaApp } = await client.sendCode({ apiId, apiHash }, phone);
   fs.writeFileSync(PENDING_FILE, JSON.stringify({ session: client.session.save(), phoneCodeHash }), { mode: 0o600 });
-  await client.disconnect();
+  await client.destroy();
   return isCodeViaApp ? 'Telegram app' : 'SMS';
 }
 
@@ -184,7 +184,7 @@ export async function verify(code, password) {
     password ||= process.env.TG_PASSWORD;
     if (!password) {
       // Keep the pending state so verify can be re-run with the password.
-      await client.disconnect();
+      await client.destroy();
       throw new Error('2FA password required: telegramcp verify <code> <password>');
     }
     await client.signInWithPassword({ apiId, apiHash }, { password: async () => password, onError: async (e) => { throw e; } });
