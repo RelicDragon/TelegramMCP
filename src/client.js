@@ -32,7 +32,7 @@ export const SESSION_FILE = process.env.TG_SESSION_FILE || path.join(DATA_DIR, '
 export function credentials() {
   const apiId = Number(process.env.API_ID);
   const apiHash = process.env.API_HASH;
-  if (!apiId || !apiHash) throw new Error(`API_ID / API_HASH missing. Run \`telegram-mcp login\` (or fill ${ENV_FILE}).`);
+  if (!apiId || !apiHash) throw new Error(`API_ID / API_HASH missing. Run \`telegramcp login\` (or fill ${ENV_FILE}).`);
   return { apiId, apiHash };
 }
 

@@ -24,10 +24,10 @@ let connecting;
 async function tg() {
   if (client?.connected) return client;
   connecting ||= (async () => {
-    if (!readSession()) throw new Error('Telegram session missing. Run `telegram-mcp login` in a terminal.');
+    if (!readSession()) throw new Error('Telegram session missing. Run `telegramcp login` in a terminal.');
     const c = createClient();
     await c.connect();
-    if (!(await c.checkAuthorization())) throw new Error('Telegram session is not authorized. Run `telegram-mcp login`.');
+    if (!(await c.checkAuthorization())) throw new Error('Telegram session is not authorized. Run `telegramcp login`.');
     client = c;
     return c;
   })().finally(() => { connecting = undefined; });

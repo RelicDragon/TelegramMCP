@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// telegram-mcp — installer / manager CLI. With no arguments and a piped stdin it runs the MCP server,
-// so MCP clients can launch `telegram-mcp` directly; in a terminal it opens an interactive menu.
+// telegramcp — installer / manager CLI. With no arguments and a piped stdin it runs the MCP server,
+// so MCP clients can launch `telegramcp` directly; in a terminal it opens an interactive menu.
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -20,24 +20,24 @@ const CWD = process.env.INIT_CWD || process.cwd(); // npm scripts chdir to the p
 const isGitCheckout = fs.existsSync(path.join(ROOT, '.git'));
 const isNpxCache = ROOT.split(path.sep).includes('_npx');
 
-const HELP = `${pc.bold('telegram-mcp')} ${pc.dim(`v${pkg.version}`)} — Telegram account MCP server
+const HELP = `${pc.bold('telegramcp')} ${pc.dim(`v${pkg.version}`)} — Telegram account MCP server
 
 ${pc.bold('Usage')}
-  telegram-mcp                         interactive menu (in a terminal) / MCP server (when piped)
-  telegram-mcp setup                   guided setup: login + register in your AI clients
-  telegram-mcp login [--qr|--code] [--force]
-  telegram-mcp logout                  revoke this machine's session
-  telegram-mcp status                  login + where the server is registered
-  telegram-mcp register [agent...]     interactive picker, or register directly in the given agents
+  telegramcp                         interactive menu (in a terminal) / MCP server (when piped)
+  telegramcp setup                   guided setup: login + register in your AI clients
+  telegramcp login [--qr|--code] [--force]
+  telegramcp logout                  revoke this machine's session
+  telegramcp status                  login + where the server is registered
+  telegramcp register [agent...]     interactive picker, or register directly in the given agents
         --all                          every detected agent
         --scope global|project         project = config in the current directory (default global)
         -y, --yes                      skip confirmation
-  telegram-mcp unregister [agent...] [--all] [--scope ...] [-y]
-  telegram-mcp list                    all supported agents, detection and registration state
-  telegram-mcp refresh                 rewrite registered paths (after moving the install or changing Node)
-  telegram-mcp update                  update to the latest version, then refresh
-  telegram-mcp send-code | verify <code> [2fa]   non-interactive login
-  telegram-mcp serve                   run the MCP server on stdio
+  telegramcp unregister [agent...] [--all] [--scope ...] [-y]
+  telegramcp list                    all supported agents, detection and registration state
+  telegramcp refresh                 rewrite registered paths (after moving the install or changing Node)
+  telegramcp update                  update to the latest version, then refresh
+  telegramcp send-code | verify <code> [2fa]   non-interactive login
+  telegramcp serve                   run the MCP server on stdio
 
 ${pc.bold('Agents')}  ${Object.keys(agents).join(', ')}
 ${pc.dim('aliases: claude, desktop, code, copilot, gemini, kiro')}
@@ -49,7 +49,7 @@ ${pc.bold('Data')}  ${shortPath(DATA_DIR)} ${pc.dim('(.env, session.txt, state.j
 function parseAgents(names) {
   const ids = names.flatMap((n) => n.split(',')).filter(Boolean);
   const bad = ids.filter((n) => !resolveAgentId(n));
-  if (bad.length) throw new Error(`Unknown agent(s): ${bad.join(', ')}. Run \`telegram-mcp list\`.`);
+  if (bad.length) throw new Error(`Unknown agent(s): ${bad.join(', ')}. Run \`telegramcp list\`.`);
   return [...new Set(ids.map(resolveAgentId))];
 }
 
@@ -181,7 +181,7 @@ async function status() {
   s.start('Checking Telegram session');
   const me = await currentUser().catch((err) => { s.error(err.message); return undefined; });
   if (me) s.stop(`Logged in as ${pc.cyan([me.firstName, me.lastName].filter(Boolean).join(' '))}${me.username ? ` (@${me.username})` : ''}`);
-  else if (me === null) s.stop(pc.yellow('Not logged in — run `telegram-mcp login`'));
+  else if (me === null) s.stop(pc.yellow('Not logged in — run `telegramcp login`'));
   const regs = registrations();
   const globals = Object.keys(agents).filter((id) => isRegistered(id, 'global'));
   p.log.info(`Registered (global): ${globals.length ? globals.map((id) => agents[id].name).join(', ') : pc.dim('nowhere')}`);
@@ -192,7 +192,7 @@ async function status() {
 
 function refresh() {
   const results = refreshAll();
-  if (!results.length) return p.log.info('Nothing registered yet — run `telegram-mcp register`.');
+  if (!results.length) return p.log.info('Nothing registered yet — run `telegramcp register`.');
   for (const r of results) {
     const label = `${agents[r.agent].name}${r.scope === 'project' ? ` @ ${shortPath(r.cwd)}` : ''}`;
     if (r.status === 'ok') p.log.success(`${label} ${pc.dim(`→ ${r.file}`)}`);
@@ -227,7 +227,7 @@ function ensureStableInstall() {
   p.log.step(`npm install -g ${INSTALL_SPEC}`);
   run('npm', ['install', '-g', INSTALL_SPEC, '--no-audit', '--no-fund']);
   p.log.step('Continuing with the global install');
-  run('telegram-mcp', ['setup']);
+  run('telegramcp', ['setup']);
   return true;
 }
 
@@ -239,7 +239,7 @@ async function setup() {
   await registerInteractive();
   p.note(
     `Restart your AI clients to pick up the ${pc.cyan('telegram')} server.\n` +
-    `Later: ${pc.cyan('telegram-mcp register')} to add/remove agents, ${pc.cyan('telegram-mcp update')} to update.`,
+    `Later: ${pc.cyan('telegramcp register')} to add/remove agents, ${pc.cyan('telegramcp update')} to update.`,
     'Done',
   );
 }
@@ -286,7 +286,7 @@ async function main() {
   if (o.help || cmd === 'help') return console.log(HELP);
   if (cmd === 'serve' || (!cmd && !process.stdin.isTTY)) return import('./server.js');
 
-  if (!o.quiet) p.intro(`${pc.bgCyan(pc.black(' telegram-mcp '))} ${pc.dim(`v${pkg.version}`)}`);
+  if (!o.quiet) p.intro(`${pc.bgCyan(pc.black(' telegramcp '))} ${pc.dim(`v${pkg.version}`)}`);
   if (!cmd) cmd = await menu();
 
   switch (cmd) {
@@ -303,7 +303,7 @@ async function main() {
     case 'register':
       if (rest.length || o.all) await registerDirect(rest, { all: o.all, scope, yes: o.yes });
       else if (process.stdin.isTTY) await registerInteractive({ scope });
-      else throw new Error('No TTY: pass agents, e.g. `telegram-mcp register cursor codex -y` (see `telegram-mcp list`).');
+      else throw new Error('No TTY: pass agents, e.g. `telegramcp register cursor codex -y` (see `telegramcp list`).');
       break;
     case 'unregister':
       if (rest.length || o.all) await registerDirect(rest, { all: o.all, scope, yes: o.yes, removing: true });
@@ -311,9 +311,9 @@ async function main() {
       break;
     case 'refresh': refresh(); break;
     case 'update': update(); break;
-    case 'send-code': p.log.success(`Code sent via ${await sendCode()}. Then: telegram-mcp verify <code> [2fa-password]`); break;
+    case 'send-code': p.log.success(`Code sent via ${await sendCode()}. Then: telegramcp verify <code> [2fa-password]`); break;
     case 'verify': p.log.success(`Logged in as ${await verify(rest[0], rest[1])}`); break;
-    default: throw new Error(`Unknown command "${cmd}". Run \`telegram-mcp --help\`.`);
+    default: throw new Error(`Unknown command "${cmd}". Run \`telegramcp --help\`.`);
   }
   if (!o.quiet) p.outro(pc.dim('Done'));
 }

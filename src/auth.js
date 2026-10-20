@@ -173,7 +173,7 @@ export async function sendCode() {
 
 export async function verify(code, password) {
   const { apiId, apiHash } = credentials();
-  if (!fs.existsSync(PENDING_FILE)) throw new Error('No pending login. Run `telegram-mcp send-code` first.');
+  if (!fs.existsSync(PENDING_FILE)) throw new Error('No pending login. Run `telegramcp send-code` first.');
   const pending = JSON.parse(fs.readFileSync(PENDING_FILE, 'utf8'));
   const client = createClient(pending.session);
   await client.connect();
@@ -185,7 +185,7 @@ export async function verify(code, password) {
     if (!password) {
       // Keep the pending state so verify can be re-run with the password.
       await client.disconnect();
-      throw new Error('2FA password required: telegram-mcp verify <code> <password>');
+      throw new Error('2FA password required: telegramcp verify <code> <password>');
     }
     await client.signInWithPassword({ apiId, apiHash }, { password: async () => password, onError: async (e) => { throw e; } });
   }

@@ -1,4 +1,6 @@
-# Telegram MCP
+# telegramcp
+
+[![npm](https://img.shields.io/npm/v/telegramcp)](https://www.npmjs.com/package/telegramcp)
 
 An MCP server that gives your AI agents (Claude Code, Codex, Cursor, VS Code, Claude Desktop, Gemini CLI, Zed, …)
 access to **your personal Telegram account**: private chats, groups, channels, forum topics, search, media.
@@ -7,14 +9,11 @@ It uses GramJS / MTProto, so the agent sees your account the way the Telegram ap
 ## Install (one line)
 
 ```bash
-npm install -g github:RelicDragon/TelegramMCP && telegram-mcp setup
+npx -y telegramcp setup
 ```
 
-or without a global install up front (the installer then installs itself globally so your clients get a stable path):
-
-```bash
-npx -y github:RelicDragon/TelegramMCP setup
-```
+The installer installs itself globally (so your AI clients get a stable path) and starts the wizard.
+Equivalent: `npm install -g telegramcp && telegramcp setup`. Latest from GitHub: `npm install -g github:RelicDragon/TelegramMCP`.
 
 `setup` is an interactive wizard:
 
@@ -29,17 +28,17 @@ Restart your AI clients afterwards.
 
 | Command | What it does |
 | --- | --- |
-| `telegram-mcp` | Interactive menu |
-| `telegram-mcp register` | Interactive picker: check to add, uncheck to remove |
-| `telegram-mcp register cursor codex -y` | Register directly, no prompts (`--all` = all detected, `--project` = config in the current dir) |
-| `telegram-mcp unregister zed -y` | Remove from given agents (no args → interactive) |
-| `telegram-mcp list` | Supported agents, what's detected, where it's registered |
-| `telegram-mcp status` | Logged-in account, registrations, install & data paths |
-| `telegram-mcp update` | Update to the latest version, then **refresh paths** in every registered client |
-| `telegram-mcp refresh` | Rewrite registered paths only (after moving the install or switching Node versions, e.g. with nvm) |
-| `telegram-mcp login [--qr \| --code] [--force]` | Log in again |
-| `telegram-mcp logout` | Revoke this machine's session |
-| `telegram-mcp send-code` / `verify <code> [2fa]` | Non-interactive login, for scripts |
+| `telegramcp` | Interactive menu |
+| `telegramcp register` | Interactive picker: check to add, uncheck to remove |
+| `telegramcp register cursor codex -y` | Register directly, no prompts (`--all` = all detected, `--project` = config in the current dir) |
+| `telegramcp unregister zed -y` | Remove from given agents (no args → interactive) |
+| `telegramcp list` | Supported agents, what's detected, where it's registered |
+| `telegramcp status` | Logged-in account, registrations, install & data paths |
+| `telegramcp update` | Update to the latest version, then **refresh paths** in every registered client |
+| `telegramcp refresh` | Rewrite registered paths only (after moving the install or switching Node versions, e.g. with nvm) |
+| `telegramcp login [--qr \| --code] [--force]` | Log in again |
+| `telegramcp logout` | Revoke this machine's session |
+| `telegramcp send-code` / `verify <code> [2fa]` | Non-interactive login, for scripts |
 
 ### Supported agents
 
@@ -63,10 +62,10 @@ Restart your AI clients afterwards.
 Config edits are surgical: JSON/JSONC comments, TOML and YAML formatting and your other servers are preserved,
 and the previous file is kept as `<file>.bak`. Paths follow [add-mcp](https://github.com/neon-solutions/add-mcp).
 
-Any other MCP client: run `telegram-mcp` with no arguments (stdio), or
+Any other MCP client: run `telegramcp` with no arguments (stdio), or
 
 ```json
-{ "mcpServers": { "telegram": { "command": "telegram-mcp" } } }
+{ "mcpServers": { "telegram": { "command": "telegramcp" } } }
 ```
 
 ## Where things live
@@ -98,4 +97,4 @@ npm run setup            # same wizard, registered against this checkout
 npm run register:cursor  # register:<agent> for each agent, register:all for all detected
 ```
 
-`telegram-mcp update` on a git checkout does `git pull` + `npm install` and then refreshes paths.
+`telegramcp update` on a git checkout does `git pull` + `npm install` and then refreshes paths.

@@ -1,9 +1,10 @@
 {
-  "name": "@relicdragon/telegram-mcp",
-  "version": "1.1.0",
+  "name": "telegramcp",
+  "version": "1.2.0",
   "description": "MCP server that gives your AI agents (Claude Code, Codex, Cursor, …) access to your personal Telegram account",
   "type": "module",
   "bin": {
+    "telegramcp": "src/cli.js",
     "telegram-mcp": "src/cli.js"
   },
   "main": "src/server.js",
@@ -17,7 +18,7 @@
     "url": "git+https://github.com/RelicDragon/TelegramMCP.git"
   },
   "config": {
-    "installSpec": "github:RelicDragon/TelegramMCP"
+    "installSpec": "telegramcp"
   },
   "keywords": [
     "mcp",
@@ -70,5 +71,9 @@
     "telegram": "^2.26.22",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
+  },
+  "homepage": "https://github.com/RelicDragon/TelegramMCP#readme",
+  "bugs": {
+    "url": "https://github.com/RelicDragon/TelegramMCP/issues"
   }
 }
