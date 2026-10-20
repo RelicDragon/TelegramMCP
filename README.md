@@ -16,10 +16,13 @@ revoked (`AUTH_KEY_DUPLICATED`).
     npm install
     npm run login            # prompts for API_ID/API_HASH/phone if missing, then code + 2FA
     # or: npm run login:qr   # scan a QR from Telegram app → Settings → Devices → Link Desktop Device
-    npm run register:claude  # adds the "telegram" MCP server to Claude Code (user scope)
+    npm run register         # adds the "telegram" MCP server to Claude Code, Codex and Cursor
 
 `API_ID` / `API_HASH` come from https://my.telegram.org (or copy them from TelegramAutobot's `.env`).
 They're stored in `.env` (see `.env.example`). Restart your MCP client afterwards.
+
+Register in one client only: `npm run register:claude`, `register:codex` (`~/.codex/config.toml`)
+or `register:cursor` (`~/.cursor/mcp.json`). Re-run after moving the checkout or changing Node versions.
 
 Other commands: `npm run status`, `npm run logout` (revokes this machine's session).
 

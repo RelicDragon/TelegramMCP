@@ -13,7 +13,10 @@
     "login:qr": "node src/login.js qr",
     "status": "node src/login.js status",
     "logout": "node src/login.js logout",
-    "register:claude": "bash scripts/register-claude.sh"
+    "register": "node scripts/register.js all",
+    "register:claude": "node scripts/register.js claude",
+    "register:codex": "node scripts/register.js codex",
+    "register:cursor": "node scripts/register.js cursor"
   },
   "license": "ISC",
   "dependencies": {
