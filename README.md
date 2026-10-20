@@ -40,6 +40,7 @@ Restart your AI clients afterwards.
 | `telegramcp refresh` | Rewrite registered paths only (after moving the install or switching Node versions, e.g. with nvm) |
 | `telegramcp login [--qr \| --code] [--force]` | Log in again |
 | `telegramcp logout` | Revoke this machine's session |
+| `telegramcp write [on\|off\|status]` | **High risk:** let agents send/edit/delete messages as you ([details](#write-mode-high-risk-off-by-default)) |
 | `telegramcp send-code` / `verify <code> [2fa]` | Non-interactive login, for scripts |
 
 ### Supported agents
@@ -84,7 +85,25 @@ Read-only: `get_me`, `list_chats`, `get_chat`, `read_messages`, `search_messages
 `get_message_context`, `get_unread`, `list_topics`, `list_participants`, `list_contacts`, `download_media`.
 Reading never marks messages as read.
 
-With `TELEGRAMCP_ALLOW_WRITE=true` (in the data-dir `.env`): `send_message`, `mark_read`.
+### Write mode (high risk, off by default)
+
+```bash
+telegramcp write                                # interactive: off / only chosen chats / all chats
+telegramcp write on --chats me,@alice,-100123 -y
+telegramcp write off
+```
+
+When it's on, agents can act **as you**: `send_message` (replies, forum topics, markdown/html), `send_file`,
+`forward_messages`, `edit_message` / `delete_messages` (your own messages only), `send_reaction`, `mark_read`.
+Recipients can't tell an AI wrote it, and any message sent to you could try a prompt injection, so keep
+your client's tool approval on for these tools. Safeguards:
+
+- optional chat allowlist (`TELEGRAMCP_WRITE_CHATS`: ids, @usernames, `me`), checked before every write
+- rate limit, 20 writes/min by default (`TELEGRAMCP_WRITE_RATE`)
+- `send_file` refuses hidden files/dirs (`~/.ssh`, `.env`, …) and the telegramcp data dir
+- every write is appended to `writes.log` in the data dir
+
+It's stored in the data-dir `.env` (`TELEGRAMCP_ALLOW_WRITE`). Restart your AI clients after changing it.
 
 Chats can be referenced by id, `@username`, t.me link, `me` (Saved Messages), or a title substring.
 

@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util';
 import { spawnSync } from 'node:child_process';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
-import { ROOT, DATA_DIR, readState, writeState, readSession } from './client.js';
+import { ROOT, DATA_DIR, WRITE_LOG, readState, writeState, readSession, saveEnv, writeSettings } from './client.js';
 import {
   agents, resolveAgentId, supportsScope, configPath, shortPath, isRegistered,
   register, unregister, registrations, refreshAll, serverCommand,
@@ -42,6 +42,8 @@ ${pc.bold('Usage')}
   telegramcp list                    all supported agents, detection and registration state
   telegramcp refresh                 rewrite registered paths (after moving the install or changing Node)
   telegramcp update [--force]        update if a newer version exists, then refresh
+  telegramcp write [on|off|status]   ${pc.red('high risk')}: let agents send/edit/delete messages as you
+        --chats me,@alice,-100…        only in these chats (default with "on": all chats)
   telegramcp send-code | verify <code> [2fa]   non-interactive login
   telegramcp serve                   run the MCP server on stdio
 
@@ -193,7 +195,65 @@ async function status() {
   p.log.info(`Registered (global): ${globals.length ? globals.map((id) => agents[id].name).join(', ') : pc.dim('nowhere')}`);
   const projects = regs.filter((r) => r.scope === 'project');
   if (projects.length) p.log.info(`Registered (project): ${projects.map((r) => `${agents[r.agent]?.name} @ ${shortPath(r.cwd)}`).join(', ')}`);
+  p.log.info(`Write mode: ${describeWrite()}`);
   p.log.info(pc.dim(`install: ${ROOT}${isGitCheckout ? ' (git checkout)' : ''}\ndata:    ${DATA_DIR}\nnode:    ${process.execPath}`));
+}
+
+// ---------- write mode ----------
+
+function describeWrite(w = writeSettings()) {
+  if (!w.enabled) return pc.green('off (read-only)');
+  return pc.red(`ON — agents can write as you in ${w.chats.length ? w.chats.join(', ') : 'ALL chats'}`);
+}
+
+async function writeMode(action, { chats, yes }) {
+  const w = writeSettings();
+  if (action === 'status') return p.log.info(`Write mode: ${describeWrite(w)}`);
+  if (!action) {
+    if (!process.stdin.isTTY) throw new Error('No TTY: use `telegramcp write on|off [--chats …] -y`.');
+    p.log.info(`Write mode: ${describeWrite(w)}`);
+    const choice = answer(await p.select({
+      message: 'Allow AI agents to write to Telegram as you?',
+      initialValue: !w.enabled ? 'off' : w.chats.length ? 'some' : 'all',
+      options: [
+        { value: 'off', label: 'Off: read-only', hint: 'recommended' },
+        { value: 'some', label: 'On, only in chosen chats', hint: 'ids, @usernames, me' },
+        { value: 'all', label: 'On, in all chats', hint: 'highest risk' },
+      ],
+    }));
+    action = choice === 'off' ? 'off' : 'on';
+    chats = choice === 'all' ? '' : choice === 'some' ? answer(await p.text({
+      message: 'Chats where agents may write (comma-separated; ids from list_chats)',
+      placeholder: 'me, @alice, -1001234567890',
+      initialValue: w.chats.join(', '),
+      validate: (v) => (v?.trim() ? undefined : 'Enter at least one chat'),
+    })) : undefined;
+  }
+  if (action === 'off') {
+    saveEnv({ TELEGRAMCP_ALLOW_WRITE: 'false' });
+    p.log.success(`Write mode ${pc.green('off')}: the server is read-only.`);
+    return p.log.info('Restart your AI clients to apply.');
+  }
+  if (action !== 'on') throw new Error('Usage: telegramcp write [on|off|status] [--chats me,@alice,-100…] [-y]');
+  const list = (chats ?? '').split(',').map((c) => c.trim()).filter(Boolean);
+  p.note([
+    `Agents can ${pc.bold('send, edit, delete, forward, send files and react')} as you`,
+    `in ${list.length ? list.join(', ') : pc.red('ALL your chats')}. Recipients can't tell an AI wrote it.`,
+    '',
+    `${pc.bold('Prompt injection:')} a message sent to you can try to trick an`,
+    'agent into writing, or into leaking what it read. Keep tool approval',
+    'on in your AI client: never auto-approve telegramcp write tools.',
+    'Spammy behaviour can get your Telegram account limited or banned.',
+    '',
+    pc.dim('Safeguards: edit/delete only your own messages, no hidden files,'),
+    pc.dim(`${w.perMinute} writes/min, every write logged to ${shortPath(WRITE_LOG)}`),
+  ].join('\n'), pc.red('High risk'));
+  if (!yes && !answer(await p.confirm({ message: 'Enable write mode?', initialValue: false }))) {
+    return p.log.info('Unchanged.');
+  }
+  saveEnv({ TELEGRAMCP_ALLOW_WRITE: 'true', TELEGRAMCP_WRITE_CHATS: list.join(',') });
+  p.log.warn(`Write mode: ${describeWrite()}`);
+  p.log.info(`Restart your AI clients to apply. Turn off any time: ${pc.cyan('telegramcp write off')}`);
 }
 
 function refresh() {
@@ -324,7 +384,8 @@ async function setup() {
   await registerInteractive();
   p.note(
     `Restart your AI clients to pick up the ${pc.cyan('telegramcp')} server.\n` +
-    `Later: ${pc.cyan('telegramcp register')} to add/remove agents, ${pc.cyan('telegramcp update')} to update.`,
+    `Later: ${pc.cyan('telegramcp register')} to add/remove agents, ${pc.cyan('telegramcp update')} to update.\n` +
+    `The server is read-only; ${pc.cyan('telegramcp write')} lets agents send messages as you (${pc.red('high risk')}).`,
     'Done',
   );
 }
@@ -338,6 +399,7 @@ async function menu() {
       { value: 'register', label: 'Choose where it is registered', hint: 'add / remove agents' },
       { value: 'login', label: loggedIn ? 'Log in again' : 'Log in', hint: 'QR or phone code' },
       { value: 'status', label: 'Status' },
+      { value: 'write', label: 'Write mode', hint: writeSettings().enabled ? pc.red('ON') : 'off · let agents send as you' },
       { value: 'update', label: 'Update', hint: 'latest version + refresh paths' },
       { value: 'logout', label: 'Log out', hint: 'revoke this machine\'s session' },
     ],
@@ -359,6 +421,7 @@ async function main() {
       code: { type: 'boolean' },
       force: { type: 'boolean' },
       quiet: { type: 'boolean' },
+      chats: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean', short: 'v' },
     },
@@ -396,6 +459,7 @@ async function main() {
       break;
     case 'refresh': refresh(); break;
     case 'update': update({ force: o.force }); break;
+    case 'write': await writeMode(rest[0], { chats: o.chats, yes: o.yes }); break;
     case 'send-code': p.log.success(`Code sent via ${await sendCode()}. Then: telegramcp verify <code> [2fa-password]`); break;
     case 'verify': p.log.success(`Logged in as ${await verify(rest[0], rest[1])}`); break;
     default: throw new Error(`Unknown command "${cmd}". Run \`telegramcp --help\`.`);

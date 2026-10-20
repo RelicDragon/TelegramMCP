@@ -1,6 +1,6 @@
 {
   "name": "telegramcp",
-  "version": "1.2.3",
+  "version": "1.3.0",
   "description": "MCP server that gives your AI agents (Claude Code, Codex, Cursor, …) access to your personal Telegram account",
   "type": "module",
   "bin": {

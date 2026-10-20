@@ -73,3 +73,14 @@ export function createClient(session = readSession()) {
     appVersion: '1.0.0',
   });
 }
+
+// High-risk write mode (agents act as the user). Off unless TELEGRAMCP_ALLOW_WRITE=true;
+// TELEGRAMCP_WRITE_CHATS optionally restricts it to listed chats (ids, @usernames, "me").
+export const WRITE_LOG = path.join(DATA_DIR, 'writes.log');
+export function writeSettings() {
+  return {
+    enabled: process.env.TELEGRAMCP_ALLOW_WRITE === 'true',
+    chats: (process.env.TELEGRAMCP_WRITE_CHATS || '').split(',').map((s) => s.trim()).filter(Boolean),
+    perMinute: Number(process.env.TELEGRAMCP_WRITE_RATE) || 20,
+  };
+}
