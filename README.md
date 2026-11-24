@@ -61,6 +61,7 @@ Restart your AI clients afterwards.
 | `goose` | Goose | `goose/config.yaml` (`extensions`) | — |
 | `cline` | Cline (VS Code) | `cline_mcp_settings.json` | — |
 | `kiro-cli` (`kiro`) | Kiro | `~/.kiro/settings/mcp.json` | `.kiro/settings/mcp.json` |
+| `helmlane` | [Helmlane](https://helmlane.com): one running copy shared with every app | via `helmlane connectors add` (Helmlane's `connectors.json`) | — |
 
 Config edits are surgical: JSON/JSONC comments, TOML and YAML formatting and your other servers are preserved,
 and the previous file is kept as `<file>.bak`. Paths follow [add-mcp](https://github.com/neon-solutions/add-mcp).

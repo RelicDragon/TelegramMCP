@@ -58,7 +58,8 @@
     "register:goose": "node src/cli.js register goose -y",
     "register:cline": "node src/cli.js register cline -y",
     "register:kiro": "node src/cli.js register kiro -y",
-    "register:all": "node src/cli.js register --all -y"
+    "register:all": "node src/cli.js register --all -y",
+    "register:helmlane": "node src/cli.js register helmlane -y"
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",

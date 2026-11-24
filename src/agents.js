@@ -30,6 +30,37 @@ const standard = ({ command, args }) => ({ command, args });
 
 const firstExisting = (...files) => files.find((f) => fs.existsSync(f)) ?? files[0];
 
+// Helmlane (helmlane.com) finds MCP servers in other clients' configs, but a server added to Helmlane itself
+// runs once for every app instead of once per client. Changes go through its CLI, which owns connectors.json.
+function helmlane(args) {
+  return execFileSync('helmlane', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000 });
+}
+function hasHelmlaneCli() {
+  try {
+    helmlane(['--version']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function helmlaneEntry() {
+  try {
+    const list = JSON.parse(helmlane(['connectors', '--json']));
+    return (list.servers ?? []).find((s) => s.source === 'helmlane' && s.name === SERVER_NAME) ?? null;
+  } catch {
+    return null;
+  }
+}
+const helmlaneFile = path.join(appSupport, 'helmlane', 'agent', 'connectors.json');
+function helmlaneCommand() {
+  try {
+    const file = JSON.parse(fs.readFileSync(helmlaneFile, 'utf8'));
+    return (file.servers ?? []).find((s) => s.name === SERVER_NAME) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function hasClaudeCli() {
   try {
     execFileSync('claude', ['--version'], { stdio: 'ignore' });
@@ -171,6 +202,27 @@ export const agents = {
   },
 };
 
+agents.helmlane = {
+  name: 'Helmlane',
+  global: helmlaneFile,
+  key: 'servers',
+  format: 'helmlane',
+  detect: hasHelmlaneCli,
+  entry: standard,
+  cli: {
+    available: () => true,
+    add: (entry) => {
+      if (!hasHelmlaneCli()) throw new Error('The helmlane command was not found. Install Helmlane, or add the server in the Helmlane app.');
+      const current = helmlaneCommand();
+      if (current && current.command === entry.command && JSON.stringify(current.args ?? []) === JSON.stringify(entry.args)) return;
+      // Re-adding under the same name keeps the connector's handle, so existing sharing survives the swap.
+      if (current || helmlaneEntry()) helmlane(['connectors', 'remove', SERVER_NAME]);
+      helmlane(['connectors', 'add', SERVER_NAME, '--', entry.command, ...entry.args]);
+    },
+    remove: () => helmlane(['connectors', 'remove', SERVER_NAME]),
+  },
+};
+
 export const aliases = {
   claude: 'claude-code',
   desktop: 'claude-desktop',
@@ -252,7 +304,14 @@ const yaml = {
   },
 };
 
-const formats = { json, toml, yaml };
+// Helmlane is changed only through its CLI (see agents.helmlane); this adapter only answers "is it there?".
+const helmlaneFormat = {
+  has: () => Boolean(helmlaneEntry()),
+  set: () => { throw new Error('Use the helmlane CLI'); },
+  remove: () => { throw new Error('Use the helmlane CLI'); },
+};
+
+const formats = { json, toml, yaml, helmlane: helmlaneFormat };
 const read = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
 
 // ---------- operations ----------
@@ -285,7 +344,7 @@ export function register(id, scope, cwd) {
   if (scope === 'global' && a.cli?.available()) {
     a.cli.add(entry);
     remember({ agent: id, scope }, true);
-    return `${shortPath(a.global)} (via claude CLI)`;
+    return `${shortPath(a.global)} (via ${id === 'helmlane' ? 'helmlane' : 'claude'} CLI)`;
   }
   const file = configPath(id, scope, cwd);
   fs.mkdirSync(path.dirname(file), { recursive: true });
