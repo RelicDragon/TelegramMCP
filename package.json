@@ -66,7 +66,7 @@
     "register:all": "node src/cli.js register --all -y",
     "register:helmlane": "node src/cli.js register helmlane -y",
     "build:native": "sh native/build.sh",
-    "prepublishOnly": "node -e \"process.platform==='darwin'?require('child_process').execSync('sh native/build.sh',{stdio:'inherit'}):require('fs').accessSync('bin/viber-ax')\""
+    "prepublishOnly": "node -e \"process.platform==='darwin'?require('child_process').execSync('sh native/build.sh',{stdio:'inherit'}):require('fs').accessSync('bin/telegramcp.app/Contents/MacOS/viber-ax')\""
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",

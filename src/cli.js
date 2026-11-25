@@ -46,7 +46,7 @@ ${pc.bold('Usage')}
   telegramcp write [on|off|status]   ${pc.red('high risk')}: let agents send/edit/delete messages as you
         --chats me,@alice,-100…        only in these chats (default with "on": all chats)
   telegramcp write viber [on|off|status] [--chats "A,B"]   let agents send into the open Viber chat
-  telegramcp permissions             macOS: ask for Accessibility (Viber) and show what WhatsApp/Viber need
+  telegramcp permissions             macOS: walk through the permissions Viber needs (and what WhatsApp needs)
   telegramcp send-code | verify <code> [2fa]   non-interactive login
   telegramcp serve                   run the MCP server on stdio
 
@@ -202,6 +202,12 @@ async function status() {
   const notes = messengerNotes();
   p.log.info(`WhatsApp: ${notes.whatsapp}`);
   p.log.info(`Viber: ${notes.viber}${notes.viber.startsWith('on') ? ` · sending ${describeViberWrite()}` : ''}`);
+  if (notes.viber.startsWith('on')) {
+    const { ax } = await import('./viber/helper.js');
+    const perms = await ax(['permissions']).catch(() => null);
+    const off = PERMISSIONS.filter((perm) => perms && !perms[perm.key]).map((perm) => perm.label);
+    if (perms && off.length) p.log.warn(`Viber needs ${off.join(' and ')} for telegramcp: run \`telegramcp permissions\``);
+  }
   p.log.info(pc.dim(`install: ${ROOT}${isGitCheckout ? ' (git checkout)' : ''}\ndata:    ${DATA_DIR}\nnode:    ${process.execPath}`));
 }
 
@@ -293,18 +299,47 @@ async function viberWriteMode(action, { chats, yes }) {
   p.log.info('Restart your AI clients to apply.');
 }
 
+// Viber's permissions belong to telegramcp.app (see native/viber-ax.swift), so this works from any terminal:
+// it puts telegramcp in both lists, opens each page that still needs a switch flipped and waits for it.
+const PERMISSIONS = [
+  { key: 'accessibility', label: 'Accessibility', pane: 'Privacy_Accessibility' },
+  { key: 'screen_recording', label: 'Screen & System Audio Recording', pane: 'Privacy_ScreenCapture' },
+];
+
 async function permissions() {
   if (process.platform !== 'darwin') return p.log.info('Only needed on macOS (WhatsApp and Viber).');
   p.note([
-    `${pc.bold('WhatsApp')}: the app that runs telegramcp needs to read WhatsApp's data`,
-    '  (System Settings → Privacy & Security → Full Disk Access) if you see "Cannot read …".',
-    `${pc.bold('Viber')}: it needs ${pc.bold('Accessibility')} and ${pc.bold('Screen Recording')}`,
-    '  (System Settings → Privacy & Security). With Helmlane, that app is Helmlane.',
+    `${pc.bold('Viber')} needs ${pc.bold('Accessibility')} and ${pc.bold('Screen Recording')}. They belong to ${pc.bold('telegramcp')} itself,`,
+    '  so you grant them once, whichever app runs telegramcp (Helmlane, Claude, Cursor, …).',
+    `${pc.bold('WhatsApp')} only needs ${pc.bold('Full Disk Access')} if its tools say "Cannot read …".`,
+    '  That one is for the app that runs telegramcp (Helmlane, Terminal, Claude, …).',
   ].join('\n'), 'macOS permissions');
-  const { ax } = await import('./viber/helper.js');
-  const r = await ax(['prompt']).catch((err) => ({ error: err.message }));
-  if (r.error) p.log.warn(r.error);
-  else p.log.info(r.accessibility ? 'Accessibility: granted for this terminal' : 'Accessibility: requested; approve it in System Settings');
+  const { ax, helperApp } = await import('./viber/helper.js');
+  let s;
+  try {
+    s = await ax(['prompt']); // adds telegramcp to both lists; macOS shows its own prompt the first time
+  } catch (err) {
+    return p.log.error(err.message);
+  }
+  if (s.charged_to && !s.charged_to.self) {
+    p.log.warn(`macOS is attributing these to ${s.charged_to.name} (${s.charged_to.path}) instead of telegramcp; turn that on instead.`);
+  }
+  for (const perm of PERMISSIONS) {
+    if (s[perm.key]) { p.log.success(`${perm.label}: on`); continue; }
+    spawnSync('open', [`x-apple.systempreferences:com.apple.preference.security?${perm.pane}`]);
+    // If it isn't listed, dragging the app in (or + and picking it) adds it.
+    spawnSync('open', ['-R', helperApp()]);
+    p.log.info(`Not in the list? Drag ${pc.bold('telegramcp')} from the Finder window into it, or click + and pick it.`);
+    const spin = p.spinner();
+    spin.start(`Turn on ${pc.bold('telegramcp')} in System Settings → Privacy & Security → ${perm.label}`);
+    const until = Date.now() + 180_000;
+    while (!s[perm.key] && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 1000));
+      s = await ax(['permissions']).catch(() => s);
+    }
+    if (s[perm.key]) spin.stop(`${perm.label}: on`);
+    else spin.stop(`${perm.label}: still off. Run \`telegramcp permissions\` again when you're ready.`, 1);
+  }
 }
 
 function refresh() {

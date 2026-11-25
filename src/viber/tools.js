@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
 import { DATA_DIR } from '../client.js';
-import { ax, layout, parseChatList, parseListBlocks, header, transcript, screenshotFile, ViberError } from './helper.js';
+import { ax, layout, parseChatList, parseListBlocks, header, transcript, screenshotFile, permissionHelp, ViberError } from './helper.js';
 
 // Sending is a separate opt-in from Telegram's write mode: `telegramcp write viber on [--chats "A,B"]`.
 export function viberWriteSettings() {
@@ -44,10 +44,11 @@ async function snapshot({ withOcr = true } = {}) {
   }
 }
 
-function image(windowId, maxWidth) {
+// Captured by the helper, so Screen Recording is telegramcp's own permission, not the host app's.
+async function image(maxWidth) {
   const file = screenshotFile();
   try {
-    execFileSync('/usr/sbin/screencapture', ['-x', '-o', '-l', String(windowId), file]);
+    await ax(['capture', file]);
     execFileSync('/usr/bin/sips', ['-Z', String(maxWidth), file], { stdio: 'ignore' });
     return { type: 'image', data: fs.readFileSync(file).toString('base64'), mimeType: 'image/png' };
   } finally {
@@ -75,8 +76,16 @@ function sameChat(a, b) {
 
 // `tool(name, description, schema, handler, annotations)` comes from server.js.
 export function registerViber(baseTool) {
+  // One Viber window, possibly many apps calling at once (e.g. through Helmlane): tools take turns, so one
+  // app's search or scroll can't land in the middle of another app's read.
+  let turn = Promise.resolve();
+  const inTurn = (handler) => (args) => {
+    const run = turn.then(() => handler(args));
+    turn = run.catch(() => {});
+    return run;
+  };
   const tool = (name, description, schema, handler, annotations = { readOnlyHint: true, openWorldHint: false }) =>
-    baseTool(name, description, schema, handler, annotations);
+    baseTool(name, description, schema, inTurn(handler), annotations);
 
   // ---------- tools ----------
 
@@ -85,14 +94,16 @@ export function registerViber(baseTool) {
     {},
     async () => {
       const s = await ax(['status']);
-      if (!s.running) return text('Viber Desktop is not running. Ask the user to open it (it can stay in the background).');
+      const help = permissionHelp(s);
+      if (!s.running) {
+        return text(['Viber Desktop is not running. Ask the user to open it (it can stay in the background).', help].filter(Boolean).join('\n'));
+      }
       const lines = [`Viber is running${s.frontmost ? ' and is the active app (the user may be using it)' : ' in the background'}.`];
       if (s.badge) lines.push(`Unread (Dock badge): ${s.badge}`);
-      if (!s.accessibility) lines.push('Accessibility permission: MISSING (needed for everything except screenshots)');
-      if (!s.screen_recording) lines.push('Screen Recording permission: MISSING (needed for chat list, names and times)');
+      if (help) lines.push(help);
       if (!s.window) lines.push('Viber has no open window: ask the user to open it once from the Dock.');
       else if (!s.window.onscreen) lines.push('Viber\'s window is minimized or on another Space, so it cannot be read.');
-      if (s.accessibility && s.window?.onscreen) {
+      if (!help && s.window?.onscreen) {
         const { ocr, lay } = await snapshot();
         const h = header(ocr, lay);
         lines.push(h ? `Open chat: ${h.title}${h.subtitle ? ` (${h.subtitle})` : ''}` : 'No chat is open.');
@@ -109,7 +120,7 @@ export function registerViber(baseTool) {
     { include_screenshot: z.boolean().default(false).describe('Also return an image of Viber\'s window') },
     async ({ include_screenshot }) => {
       const { ocr, lay } = await snapshot();
-      const extra = include_screenshot ? [image(lay.win.id, 1400)] : [];
+      const extra = include_screenshot ? [await image(1400)] : [];
       if (lay.search?.value) {
         return text(`Search "${lay.search.value}" is active; the list shows search results:\n${parseListBlocks(ocr, lay).join('\n')}`, extra);
       }
@@ -143,7 +154,7 @@ export function registerViber(baseTool) {
       const items = transcript(tree, ocr, lay);
       const out = [`${h?.title ?? 'Open chat'}${h?.subtitle ? ` — ${h.subtitle}` : ''}`, ...items.map(fmtItem)];
       if (lay.composer?.value) out.push(`(unsent draft: "${lay.composer.value}")`);
-      return text(out.join('\n'), include_screenshot ? [image(lay.win.id, 1400)] : []);
+      return text(out.join('\n'), include_screenshot ? [await image(1400)] : []);
     });
 
   tool('viber_scroll_chat', 'Viber: Scroll the open chat to older or newer messages, or jump to the latest (changes only what Viber shows).' + BACKGROUND,
@@ -183,7 +194,7 @@ export function registerViber(baseTool) {
       const s = await ax(['status']);
       if (!s.window) throw new ViberError('Viber has no open window.');
       if (!s.window.onscreen) throw new ViberError('Viber\'s window is minimized or on another Space.');
-      return { content: [image(s.window.id, max_width)] };
+      return { content: [await image(max_width)] };
     });
 
   // ---------- sending (opt-in via `telegramcp write viber on`) ----------

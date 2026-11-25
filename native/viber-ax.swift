@@ -12,12 +12,46 @@
 //   (<idSubstring> may be "re:<regex>")
 //   set <idSubstring> [nth]         AXValue := stdin (UTF-8) on the nth element whose AXIdentifier contains idSubstring
 //   action <idSubstring> <AXAction> [nth] [times]   perform an AX action (AXPress, AXIncrement, AXDecrement…)
-//   prompt                          ask macOS to show the Accessibility permission prompt for the calling app
+//   capture <png>                   capture Viber's window to <png>
+//   permissions                     Accessibility / Screen Recording state and which app macOS charges them to
+//   prompt                          add telegramcp to both permission lists (macOS shows its own prompts the first time)
+//
+// It ships as telegramcp.app (bin/telegramcp.app/Contents/MacOS/viber-ax). macOS charges Accessibility and
+// Screen Recording to the "responsible" app, normally whatever started us: a bare `node`, Terminal, an AI app.
+// So the helper re-launches itself once with that responsibility disclaimed, and the permissions belong to
+// telegramcp.app: one entry with telegramcp's name and icon, whichever app runs the MCP server.
 import AppKit
 import ApplicationServices
 import Vision
 
 let BUNDLE = "com.viber.osx"
+
+@_silgen_name("responsibility_spawnattrs_setdisclaim")
+func responsibility_spawnattrs_setdisclaim(_ attr: UnsafeMutablePointer<posix_spawnattr_t?>, _ disclaim: Int32) -> Int32
+@_silgen_name("responsibility_get_pid_responsible_for_pid")
+func responsibility_get_pid_responsible_for_pid(_ pid: pid_t) -> pid_t
+
+let RELAUNCHED = "TELEGRAMCP_AX_RELAUNCHED"
+if getenv(RELAUNCHED) == nil, Bundle.main.bundleIdentifier != nil, let exe = Bundle.main.executablePath {
+  setenv(RELAUNCHED, "1", 1)
+  var attr: posix_spawnattr_t?
+  posix_spawnattr_init(&attr)
+  _ = responsibility_spawnattrs_setdisclaim(&attr, 1)
+  let argv: [UnsafeMutablePointer<CChar>?] = CommandLine.arguments.map { strdup($0) } + [nil]
+  var child: pid_t = 0
+  // No file actions: the child inherits stdin, stdout and stderr and talks to the caller directly.
+  if posix_spawn(&child, exe, nil, &attr, argv, environ) == 0 {
+    var status: Int32 = 0
+    while waitpid(child, &status, 0) == -1 && errno == EINTR {}
+    exit(status & 0x7f == 0 ? (status >> 8) & 0xff : 1)
+  }
+  // Could not re-launch: carry on, charged to the caller.
+}
+if getenv(RELAUNCHED) != nil {
+  // The caller may kill the launcher on a timeout; don't outlive it.
+  let parent = getppid()
+  Thread.detachNewThread { while getppid() == parent { sleep(1) }; exit(2) }
+}
 
 func out(_ obj: Any) {
   let data = try! JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])
@@ -29,14 +63,40 @@ func fail(_ msg: String, _ code: String = "error") -> Never { out(["error": msg,
 let args = Array(CommandLine.arguments.dropFirst())
 let cmd = args.first ?? ""
 
+// The app macOS asks about: telegramcp itself, or (if the re-launch didn't happen) whatever runs us.
+func chargedTo() -> [String: Any] {
+  let me = getpid(), owner = responsibility_get_pid_responsible_for_pid(me)
+  if owner == me || owner <= 0 { return ["self": true, "name": "telegramcp"] }
+  var buf = [CChar](repeating: 0, count: 4096)
+  let path = proc_pidpath(owner, &buf, UInt32(buf.count)) > 0 ? String(cString: buf) : ""
+  // Name the .app when there is one: that's what System Settings lists.
+  let app = path.range(of: #"^.*?\.app(?=/)"#, options: .regularExpression).map { String(path[$0]) }
+  return ["self": false, "name": (app ?? path).split(separator: "/").last.map(String.init) ?? "", "path": app ?? path]
+}
+func permissions() -> [String: Any] {
+  ["accessibility": AXIsProcessTrusted(), "screen_recording": CGPreflightScreenCaptureAccess(), "charged_to": chargedTo()]
+}
+let SETTINGS_HINT = "If telegramcp isn't listed there, run `telegramcp permissions` in Terminal: it adds it and opens the page."
+
+if cmd == "permissions" { out(permissions()); exit(0) }
 if cmd == "prompt" {
   let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-  out(["accessibility": AXIsProcessTrustedWithOptions(opts)])
+  _ = AXIsProcessTrustedWithOptions(opts)
+  if !CGPreflightScreenCaptureAccess() {
+    _ = CGRequestScreenCaptureAccess()
+    // macOS lists an app under Screen Recording only after it tries to capture: grab one pixel and drop it.
+    let file = NSTemporaryDirectory() + "telegramcp-probe-\(getpid()).png"
+    let cap = Process(); cap.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+    cap.arguments = ["-x", "-R0,0,1,1", file]
+    try? cap.run(); cap.waitUntilExit()
+    try? FileManager.default.removeItem(atPath: file)
+  }
+  out(permissions())
   exit(0)
 }
 
 guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: BUNDLE).first else {
-  if cmd == "status" { out(["running": false]); exit(0) }
+  if cmd == "status" { out(permissions().merging(["running": false]) { a, _ in a }); exit(0) }
   fail("Viber is not running. Open Viber Desktop (it can stay in the background).", "not_running")
 }
 let pid = app.processIdentifier
@@ -87,8 +147,12 @@ func badge() -> String? {
 
 func mainWindow() -> AXUIElement? {
   if let w: AXUIElement = attr(axApp, kAXMainWindowAttribute) { return w }
-  let wins: [AXUIElement] = attr(axApp, kAXWindowsAttribute) ?? []
-  return wins.first
+  var v: CFTypeRef?
+  let err = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &v)
+  if err == .cannotComplete {
+    fail("Viber isn't answering accessibility requests right now. Try again in a minute; if it keeps happening, the user quits and reopens Viber.", "not_responding")
+  }
+  return (v as? [AXUIElement])?.first
 }
 
 struct Node { let el: AXUIElement; let info: [String: Any]; let id: String }
@@ -118,6 +182,10 @@ func collect() -> [Node] {
       walk(k, depth + 1)
     }
   }
+  var top: CFTypeRef?
+  if AXUIElementCopyAttributeValue(win, kAXChildrenAttribute as CFString, &top) == .cannotComplete {
+    fail("Viber isn't answering accessibility requests right now. Try again in a minute; if it keeps happening, the user quits and reopens Viber.", "not_responding")
+  }
   walk(win, 0)
   return nodes
 }
@@ -142,14 +210,44 @@ func requireBackground() {
 
 func requireTrusted() {
   if !AXIsProcessTrusted() {
-    fail("Accessibility permission is missing for the app that runs this MCP server. Allow it in System Settings → Privacy & Security → Accessibility, then restart it.", "no_accessibility")
+    fail("telegramcp needs the Accessibility permission. The user turns on \(permissionTarget()) in System Settings → Privacy & Security → Accessibility. \(SETTINGS_HINT)", "no_accessibility")
   }
+}
+
+// What System Settings lists: telegramcp, or the app running us if the re-launch didn't happen.
+func permissionTarget() -> String {
+  let c = chargedTo()
+  if (c["self"] as? Bool) == true { return "\"telegramcp\"" }
+  return "\"\(c["name"] ?? "")\" (\(c["path"] ?? ""), the app running telegramcp)"
+}
+
+// Viber's window as an image (Screen Recording), written to `file`.
+func capture(_ file: String) -> ([String: Any], CGImage) {
+  guard let w = windowInfo(), let wid = w["id"] as? Int else { fail("Viber has no window to read.", "no_window") }
+  if (w["onscreen"] as? Bool) == false { fail("Viber's window is minimized or on another Space; it must be open (it can be behind other windows).", "offscreen") }
+  if !CGPreflightScreenCaptureAccess() {
+    fail("telegramcp needs the Screen Recording permission. The user turns on \(permissionTarget()) in System Settings → Privacy & Security → Screen & System Audio Recording. \(SETTINGS_HINT)", "no_screen_recording")
+  }
+  let cap = Process(); cap.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+  cap.arguments = ["-x", "-o", "-l", String(wid), file]
+  try? cap.run(); cap.waitUntilExit()
+  guard cap.terminationStatus == 0, let img = NSImage(contentsOfFile: file),
+        let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+    fail("Could not capture Viber's window.", "capture_failed")
+  }
+  return (w, cg)
+}
+
+// Walking or changing Viber's accessibility tree from several processes at once (two AI apps, two copies of
+// telegramcp) makes Viber stop answering. One at a time for this user; screen captures don't need the lock.
+if ["tree", "set", "action"].contains(cmd) {
+  let fd = open(NSTemporaryDirectory() + "telegramcp-viber-ax.lock", O_CREAT | O_RDWR, 0o600)
+  if fd >= 0 { flock(fd, LOCK_EX) } // released when we exit
 }
 
 switch cmd {
 case "status":
-  var r: [String: Any] = ["running": true, "pid": pid, "frontmost": frontmost, "accessibility": AXIsProcessTrusted(),
-                          "screen_recording": CGPreflightScreenCaptureAccess()]
+  var r = permissions().merging(["running": true, "pid": pid, "frontmost": frontmost]) { a, _ in a }
   if let w = windowInfo() { r["window"] = w }
   if let b = badge() { r["badge"] = b }
   out(r)
@@ -158,18 +256,14 @@ case "tree":
   requireTrusted()
   out(["window": windowInfo() ?? [:], "frontmost": frontmost, "elements": collect().map { $0.info }])
 
+case "capture":
+  guard args.count >= 2 else { fail("usage: capture <png>") }
+  let (w, _) = capture(args[1])
+  out(["window": w, "file": args[1]])
+
 case "ocr":
   guard args.count >= 2 else { fail("usage: ocr <png>") }
-  guard let w = windowInfo(), let wid = w["id"] as? Int else { fail("Viber has no window to read.", "no_window") }
-  if (w["onscreen"] as? Bool) == false { fail("Viber's window is minimized or on another Space; it must be open (it can be behind other windows).", "offscreen") }
-  let file = args[1]
-  let cap = Process(); cap.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-  cap.arguments = ["-x", "-o", "-l", String(wid), file]
-  try? cap.run(); cap.waitUntilExit()
-  guard cap.terminationStatus == 0, let img = NSImage(contentsOfFile: file),
-        let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-    fail("Could not capture Viber's window. Allow Screen Recording for the app that runs this MCP server (System Settings → Privacy & Security → Screen & System Audio Recording).", "no_screen_recording")
-  }
+  let (w, cg) = capture(args[1])
   let req = VNRecognizeTextRequest()
   req.recognitionLevel = .accurate
   req.usesLanguageCorrection = false

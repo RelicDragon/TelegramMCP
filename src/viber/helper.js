@@ -7,28 +7,48 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { ROOT, DATA_DIR } from '../client.js';
 
-const BUNDLED = path.join(ROOT, 'bin', 'viber-ax');
+// The helper lives in telegramcp.app so macOS shows its permissions as "telegramcp" (see native/viber-ax.swift).
+const APP = 'telegramcp.app';
+const EXE = path.join('Contents', 'MacOS', 'viber-ax');
+const BUNDLED = path.join(ROOT, 'bin', APP, EXE);
 const SOURCE = path.join(ROOT, 'native', 'viber-ax.swift');
-const BUILT = path.join(DATA_DIR, 'bin', 'viber-ax');
+const BUILT_APP = path.join(DATA_DIR, APP);
+const BUILT = path.join(BUILT_APP, EXE);
 
 export class ViberError extends Error {
   constructor(message, code) { super(message); this.code = code; }
 }
 
 let helper;
-// Prefer the prebuilt universal binary; fall back to compiling the bundled source with swiftc.
+// Prefer the prebuilt, signed universal app; fall back to building one from the bundled source with swiftc.
 export function helperPath() {
   if (helper) return helper;
-  const runs = (bin) => fs.existsSync(bin) && spawnSync(bin, ['status'], { timeout: 15_000 }).status === 0;
+  const runs = (bin) => fs.existsSync(bin) && spawnSync(bin, ['permissions'], { timeout: 15_000 }).status === 0;
   if (runs(BUNDLED)) return (helper = BUNDLED);
   if (runs(BUILT) && fs.statSync(BUILT).mtimeMs >= fs.statSync(SOURCE).mtimeMs) return (helper = BUILT);
-  fs.mkdirSync(path.dirname(BUILT), { recursive: true });
-  const res = spawnSync('swiftc', ['-O', '-o', BUILT, SOURCE], { encoding: 'utf8', timeout: 300_000 });
-  if (res.status !== 0) {
-    throw new ViberError(`The viber-ax helper is missing and could not be built (${(res.stderr || res.error?.message || '').trim().split('\n')[0]}). ` +
-      'Install Xcode Command Line Tools (`xcode-select --install`) or reinstall telegramcp.', 'no_helper');
-  }
+  buildApp();
   return (helper = BUILT);
+}
+
+// The telegramcp.app bundle that holds the helper (what System Settings lists).
+export const helperApp = () => path.dirname(path.dirname(path.dirname(helperPath())));
+
+// Ad-hoc signed, so macOS asks for the permissions again after each rebuild; the npm package ships a signed one.
+function buildApp() {
+  const fail = (res) => new ViberError('The viber-ax helper is missing and could not be built ' +
+    `(${(res.stderr || res.error?.message || '').trim().split('\n')[0]}). ` +
+    'Install Xcode Command Line Tools (`xcode-select --install`) or reinstall telegramcp.', 'no_helper');
+  fs.rmSync(BUILT_APP, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(BUILT), { recursive: true });
+  fs.mkdirSync(path.join(BUILT_APP, 'Contents', 'Resources'), { recursive: true });
+  const res = spawnSync('swiftc', ['-O', '-o', BUILT, SOURCE], { encoding: 'utf8', timeout: 300_000 });
+  if (res.status !== 0) throw fail(res);
+  const { version } = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const plist = fs.readFileSync(path.join(ROOT, 'native', 'Info.plist'), 'utf8').replaceAll('__VERSION__', version);
+  fs.writeFileSync(path.join(BUILT_APP, 'Contents', 'Info.plist'), plist);
+  fs.copyFileSync(path.join(ROOT, 'native', 'AppIcon.icns'), path.join(BUILT_APP, 'Contents', 'Resources', 'AppIcon.icns'));
+  const sign = spawnSync('codesign', ['--force', '--sign', '-', BUILT_APP], { encoding: 'utf8', timeout: 60_000 });
+  if (sign.status !== 0) throw fail(sign);
 }
 
 export function ax(args, { input = '', timeout = 30_000 } = {}) {
@@ -174,4 +194,17 @@ export function transcript(tree, ocr, lay) {
 
 export function screenshotFile() {
   return path.join(os.tmpdir(), `telegramcp-viber-${process.pid}-${Date.now()}.png`);
+}
+
+// What to tell the user when a permission is missing (from `viber-ax permissions` / `status`), or null.
+export function permissionHelp(s) {
+  const missing = [!s.accessibility && 'Accessibility', !s.screen_recording && 'Screen & System Audio Recording'].filter(Boolean);
+  if (!missing.length) return null;
+  const c = s.charged_to ?? { self: true };
+  const target = c.self ? '"telegramcp"' : `"${c.name}" (${c.path}, the app running telegramcp)`;
+  return [
+    `macOS permissions missing: ${missing.join(', ')}.`,
+    `The user turns on ${target} in System Settings → Privacy & Security → ${missing.join(' and → ')}.`,
+    'If telegramcp isn\'t listed there, they run `telegramcp permissions` in Terminal: it adds telegramcp and opens the right page.',
+  ].join('\n');
 }

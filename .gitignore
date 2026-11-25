@@ -4,3 +4,4 @@ session.txt
 .login-pending.json
 *.bak
 bin/viber-ax
+bin/telegramcp.app/
