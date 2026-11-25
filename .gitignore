@@ -3,3 +3,4 @@ node_modules/
 session.txt
 .login-pending.json
 *.bak
+bin/viber-ax

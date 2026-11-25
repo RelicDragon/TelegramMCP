@@ -1,7 +1,7 @@
 {
   "name": "telegramcp",
-  "version": "1.3.0",
-  "description": "MCP server that gives your AI agents (Claude Code, Codex, Cursor, …) access to your personal Telegram account",
+  "version": "1.4.0",
+  "description": "MCP server that gives your AI agents (Claude Code, Codex, Cursor, …) access to your personal Telegram, WhatsApp and Viber",
   "type": "module",
   "bin": {
     "telegramcp": "src/cli.js"
@@ -9,6 +9,8 @@
   "main": "src/server.js",
   "files": [
     "src",
+    "bin",
+    "native",
     "README.md",
     ".env.example"
   ],
@@ -26,7 +28,10 @@
     "claude",
     "codex",
     "cursor",
-    "gramjs"
+    "gramjs",
+    "whatsapp",
+    "messenger",
+    "viber"
   ],
   "engines": {
     "node": ">=20"
@@ -59,7 +64,9 @@
     "register:cline": "node src/cli.js register cline -y",
     "register:kiro": "node src/cli.js register kiro -y",
     "register:all": "node src/cli.js register --all -y",
-    "register:helmlane": "node src/cli.js register helmlane -y"
+    "register:helmlane": "node src/cli.js register helmlane -y",
+    "build:native": "sh native/build.sh",
+    "prepublishOnly": "node -e \"process.platform==='darwin'?require('child_process').execSync('sh native/build.sh',{stdio:'inherit'}):require('fs').accessSync('bin/viber-ax')\""
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",

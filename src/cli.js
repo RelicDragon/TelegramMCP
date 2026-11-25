@@ -14,6 +14,7 @@ import {
   register, unregister, registrations, refreshAll, serverCommand,
 } from './agents.js';
 import { Cancelled, answer, loginInteractive, currentUser, logout, sendCode, verify } from './auth.js';
+import { messengerNotes } from './messengers.js';
 
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const INSTALL_SPEC = process.env.TELEGRAMCP_SPEC || pkg.config?.installSpec || pkg.name;
@@ -44,6 +45,8 @@ ${pc.bold('Usage')}
   telegramcp update [--force]        update if a newer version exists, then refresh
   telegramcp write [on|off|status]   ${pc.red('high risk')}: let agents send/edit/delete messages as you
         --chats me,@alice,-100…        only in these chats (default with "on": all chats)
+  telegramcp write viber [on|off|status] [--chats "A,B"]   let agents send into the open Viber chat
+  telegramcp permissions             macOS: ask for Accessibility (Viber) and show what WhatsApp/Viber need
   telegramcp send-code | verify <code> [2fa]   non-interactive login
   telegramcp serve                   run the MCP server on stdio
 
@@ -196,6 +199,9 @@ async function status() {
   const projects = regs.filter((r) => r.scope === 'project');
   if (projects.length) p.log.info(`Registered (project): ${projects.map((r) => `${agents[r.agent]?.name} @ ${shortPath(r.cwd)}`).join(', ')}`);
   p.log.info(`Write mode: ${describeWrite()}`);
+  const notes = messengerNotes();
+  p.log.info(`WhatsApp: ${notes.whatsapp}`);
+  p.log.info(`Viber: ${notes.viber}${notes.viber.startsWith('on') ? ` · sending ${describeViberWrite()}` : ''}`);
   p.log.info(pc.dim(`install: ${ROOT}${isGitCheckout ? ' (git checkout)' : ''}\ndata:    ${DATA_DIR}\nnode:    ${process.execPath}`));
 }
 
@@ -254,6 +260,51 @@ async function writeMode(action, { chats, yes }) {
   saveEnv({ TELEGRAMCP_ALLOW_WRITE: 'true', TELEGRAMCP_WRITE_CHATS: list.join(',') });
   p.log.warn(`Write mode: ${describeWrite()}`);
   p.log.info(`Restart your AI clients to apply. Turn off any time: ${pc.cyan('telegramcp write off')}`);
+}
+
+// ---------- Viber sending (separate opt-in) ----------
+
+function describeViberWrite() {
+  const on = process.env.TELEGRAMCP_VIBER_WRITE === 'true';
+  const chats = (process.env.TELEGRAMCP_VIBER_WRITE_CHATS || '').split(',').map((c) => c.trim()).filter(Boolean);
+  return on ? pc.red(`ON in ${chats.length ? chats.join(', ') : 'any open chat'}`) : pc.green('off');
+}
+
+async function viberWriteMode(action, { chats, yes }) {
+  if (!action || action === 'status') return p.log.info(`Viber sending: ${describeViberWrite()}`);
+  if (action === 'off') {
+    saveEnv({ TELEGRAMCP_VIBER_WRITE: 'false' });
+    p.log.success('Viber sending off.');
+    return p.log.info('Restart your AI clients to apply.');
+  }
+  if (action !== 'on') throw new Error('Usage: telegramcp write viber [on|off|status] [--chats "A,B"] [-y]');
+  const list = (chats ?? '').split(',').map((c) => c.trim()).filter(Boolean);
+  p.note([
+    `Agents can ${pc.bold('send messages')} as you into the chat that is open in Viber Desktop`,
+    `(${list.length ? list.join(', ') : pc.red('any chat')}). Recipients can't tell an AI wrote it.`,
+    'Keep tool approval on: never auto-approve viber_send_message.',
+    '',
+    pc.dim('Safeguards: the open chat must match, drafts are never touched, nothing runs while'),
+    pc.dim(`Viber is the active app, 10 sends/min, every send logged to ${shortPath(WRITE_LOG)}`),
+  ].join('\n'), pc.red('High risk'));
+  if (!yes && !answer(await p.confirm({ message: 'Enable Viber sending?', initialValue: false }))) return p.log.info('Unchanged.');
+  saveEnv({ TELEGRAMCP_VIBER_WRITE: 'true', TELEGRAMCP_VIBER_WRITE_CHATS: list.join(',') });
+  p.log.warn(`Viber sending: ${describeViberWrite()}`);
+  p.log.info('Restart your AI clients to apply.');
+}
+
+async function permissions() {
+  if (process.platform !== 'darwin') return p.log.info('Only needed on macOS (WhatsApp and Viber).');
+  p.note([
+    `${pc.bold('WhatsApp')}: the app that runs telegramcp needs to read WhatsApp's data`,
+    '  (System Settings → Privacy & Security → Full Disk Access) if you see "Cannot read …".',
+    `${pc.bold('Viber')}: it needs ${pc.bold('Accessibility')} and ${pc.bold('Screen Recording')}`,
+    '  (System Settings → Privacy & Security). With Helmlane, that app is Helmlane.',
+  ].join('\n'), 'macOS permissions');
+  const { ax } = await import('./viber/helper.js');
+  const r = await ax(['prompt']).catch((err) => ({ error: err.message }));
+  if (r.error) p.log.warn(r.error);
+  else p.log.info(r.accessibility ? 'Accessibility: granted for this terminal' : 'Accessibility: requested; approve it in System Settings');
 }
 
 function refresh() {
@@ -459,7 +510,11 @@ async function main() {
       break;
     case 'refresh': refresh(); break;
     case 'update': update({ force: o.force }); break;
-    case 'write': await writeMode(rest[0], { chats: o.chats, yes: o.yes }); break;
+    case 'write':
+      if (rest[0] === 'viber') await viberWriteMode(rest[1], { chats: o.chats, yes: o.yes });
+      else await writeMode(rest[0], { chats: o.chats, yes: o.yes });
+      break;
+    case 'permissions': await permissions(); break;
     case 'send-code': p.log.success(`Code sent via ${await sendCode()}. Then: telegramcp verify <code> [2fa-password]`); break;
     case 'verify': p.log.success(`Logged in as ${await verify(rest[0], rest[1])}`); break;
     default: throw new Error(`Unknown command "${cmd}". Run \`telegramcp --help\`.`);

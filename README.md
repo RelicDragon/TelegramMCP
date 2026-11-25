@@ -3,8 +3,13 @@
 [![npm](https://img.shields.io/npm/v/telegramcp)](https://www.npmjs.com/package/telegramcp)
 
 An MCP server that gives your AI agents (Claude Code, Codex, Cursor, VS Code, Claude Desktop, Gemini CLI, Zed, …)
-access to **your personal Telegram account**: private chats, groups, channels, forum topics, search, media.
-It uses GramJS / MTProto, so the agent sees your account the way the Telegram app does.
+access to **your personal messengers**:
+
+- **Telegram:** private chats, groups, channels, forum topics, search and media. It uses GramJS / MTProto, so the agent sees your account the way the Telegram app does.
+- **WhatsApp** (macOS): read-only, from WhatsApp Desktop's local database. It never connects to WhatsApp, so there's no ban risk.
+- **Viber** (macOS): through Viber Desktop, entirely in the background. It never takes focus, moves the pointer or types.
+
+WhatsApp and Viber turn on by themselves when their desktop apps are installed ([details](#whatsapp-and-viber-macos)).
 
 ## Install (one line)
 
@@ -111,12 +116,40 @@ Chats can be referenced by id, `@username`, t.me link, `me` (Saved Messages), or
 Other env: `TELEGRAMCP_DOWNLOAD_DIR` (default `~/Downloads/telegramcp`), `TELEGRAMCP_MAX_CHARS`, `TZ`,
 `TG_SESSION` (inject the session via env), `TG_DEVICE_NAME`, `TG_PASSWORD`.
 
+## WhatsApp and Viber (macOS)
+
+Both work on macOS only, without any login: they read what the desktop apps already have. Limit which messengers are on with `TELEGRAMCP_MESSENGERS` (default `telegram,whatsapp,viber`). `telegramcp status` shows what's on, and `telegramcp permissions` explains the macOS permissions and asks for them.
+
+**WhatsApp:** `whatsapp_get_me`, `whatsapp_list_chats`, `whatsapp_get_chat`, `whatsapp_read_messages`, `whatsapp_search_messages`, `whatsapp_get_message_context`, `whatsapp_get_unread`, `whatsapp_list_participants`, `whatsapp_list_contacts`, `whatsapp_download_media`.
+- Read-only, from WhatsApp Desktop's database. Only what it has synced is available.
+- Replies, mentions, captions and media are shown. Locked chats are left out.
+- Needs Node 22.13+ (built-in SQLite). The app that runs telegramcp may need **Full Disk Access** to read WhatsApp's data.
+
+**Viber:** `viber_get_status`, `viber_list_chats`, `viber_scroll_chat_list`, `viber_read_chat`, `viber_scroll_chat`, `viber_search`, `viber_clear_search`, `viber_screenshot`.
+- Viber has no API for personal accounts, so telegramcp reads Viber Desktop's window through the accessibility API and on-device text recognition, using the bundled `bin/viber-ax` helper.
+- It works **only in the background**: it never activates Viber, never moves the pointer or types, refuses to change anything while Viber is the active app, and never touches an unsent draft.
+- It can't switch Viber to another chat, so it acts on the chat that's open in Viber.
+- Message text is exact. `[Bracketed]` names, times and dates are read from the screen.
+- The app that runs telegramcp needs **Accessibility** and **Screen Recording**.
+
+Sending in Viber is a separate opt-in:
+
+```bash
+telegramcp write viber on --chats "Alice,Team chat"
+```
+
+That adds `viber_send_message`, which checks the open chat's title and refuses if there's a draft. It allows 10 sends a minute, and every send is logged to `writes.log`.
+
+**With Helmlane:** `telegramcp register helmlane` runs one copy for every app. Then Helmlane's agent is the app that needs the permissions above.
+
 ## Development
 
 ```bash
 git clone https://github.com/RelicDragon/TelegramMCP.git && cd TelegramMCP && npm install
 npm run setup            # same wizard, registered against this checkout
 npm run register:cursor  # register:<agent> for each agent, register:all for all detected
+node test/smoke.js whatsapp_list_chats '{"limit":5}'   # call tools through a real MCP client
+npm run build:native     # rebuild bin/viber-ax (universal) from native/viber-ax.swift; runs before publish
 ```
 
 `telegramcp update` on a git checkout does `git pull` + `npm install` and then refreshes paths.
