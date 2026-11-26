@@ -154,6 +154,43 @@ export function parseListBlocks(ocr, lay) {
   return blocks.map((b) => b.parts.sort((a, c) => a.y - c.y || a.x - c.x).map((p) => p.text).join(' · '));
 }
 
+// Rows of the visible list (chat list, recent chats or search results) with where to click them:
+// { section, title, detail, x, y }. Section headers ("Conversations", "Contacts"…) sit left of the text column and are skipped.
+export function listTargets(ocr, lay) {
+  const { list, win } = lay;
+  const textLeft = list.x + 50; // avatars occupy the first ~60pt
+  const rightCol = list.x + list.w - 90; // times, unread counts, "View more", "Clear"
+  // In search results the scroll bar starts below the first row, so the top is right under the search box.
+  const top = lay.search?.value ? win.y + 90 : list.y - 4;
+  const inList = (l) => l.y >= top && l.y + l.h <= list.y + list.h - 2 && l.x + l.w <= list.x + list.w;
+  const lines = ocr.lines.filter((l) => inList(l) && l.x >= textLeft && l.x < rightCol).sort((a, b) => a.y - b.y);
+  const blocks = [];
+  let cur = null;
+  for (const l of lines) {
+    if (cur && l.y - cur.bottom < 10) {
+      cur.lines.push(l);
+      cur.bottom = Math.max(cur.bottom, l.y + l.h);
+    } else {
+      cur = { lines: [l], top: l.y, bottom: l.y + l.h };
+      blocks.push(cur);
+    }
+  }
+  // Section headers sit at the left edge between rows; text at the left edge beside a row is its avatar.
+  const sections = ocr.lines
+    .filter((l) => inList(l) && l.x < textLeft && !blocks.some((b) => l.y + l.h / 2 >= b.top - 8 && l.y + l.h / 2 <= b.bottom + 8))
+    .sort((a, b) => a.y - b.y);
+  return blocks.map((b) => {
+    const [first, ...rest] = b.lines.sort(reading);
+    return {
+      section: sections.filter((h) => h.y < first.y).pop()?.text.trim() ?? '',
+      title: first.text.trim(),
+      detail: rest.map((l) => l.text).join(' ').trim(),
+      x: first.x + Math.min(first.w / 2, 40),
+      y: first.y + first.h / 2,
+    };
+  });
+}
+
 // ---------- open conversation ----------
 
 export function header(ocr, lay) {

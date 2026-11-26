@@ -1,8 +1,8 @@
 // viber-ax: background-only driver for Viber Desktop on macOS.
 //
-// It never activates Viber, never moves the pointer and never posts mouse or keyboard events: it only
-// reads the accessibility tree, sets values / performs AX actions on Viber's own elements, and captures
-// Viber's window image. Every command that changes Viber's UI refuses to run while Viber is the frontmost
+// It never activates Viber, never moves the pointer and never posts system-wide mouse or keyboard events: it
+// reads the accessibility tree, sets values / performs AX actions on Viber's own elements, captures Viber's
+// window image, and delivers clicks to Viber's process alone (`click`). Every command that changes Viber's UI refuses to run while Viber is the frontmost
 // app, so it can never interfere with what the user is doing in Viber.
 //
 // Commands (one JSON object on stdout; errors as {"error": "...", "code": "..."}):
@@ -12,6 +12,7 @@
 //   (<idSubstring> may be "re:<regex>")
 //   set <idSubstring> [nth]         AXValue := stdin (UTF-8) on the nth element whose AXIdentifier contains idSubstring
 //   action <idSubstring> <AXAction> [nth] [times]   perform an AX action (AXPress, AXIncrement, AXDecrement…)
+//   click <x> <y> [once]            left click at a screen point of Viber's window, delivered to Viber only (see below)
 //   capture <png>                   capture Viber's window to <png>
 //   permissions                     Accessibility / Screen Recording state and which app macOS charges them to
 //   prompt                          add telegramcp to both permission lists (macOS shows its own prompts the first time)
@@ -240,7 +241,7 @@ func capture(_ file: String) -> ([String: Any], CGImage) {
 
 // Walking or changing Viber's accessibility tree from several processes at once (two AI apps, two copies of
 // telegramcp) makes Viber stop answering. One at a time for this user; screen captures don't need the lock.
-if ["tree", "set", "action"].contains(cmd) {
+if ["tree", "set", "action", "click"].contains(cmd) {
   let fd = open(NSTemporaryDirectory() + "telegramcp-viber-ax.lock", O_CREAT | O_RDWR, 0o600)
   if fd >= 0 { flock(fd, LOCK_EX) } // released when we exit
 }
@@ -305,6 +306,56 @@ case "action":
   }
   usleep(250_000)
   out(["ok": true])
+
+case "click":
+  // A left click delivered only to Viber's process while Viber stays in the background:
+  //  1. an AppKit "application activated" event posted to Viber's pid alone: Viber's own event handling then
+  //     accepts mouse input, while the window server's front app, keyboard focus and window order stay the user's;
+  //  2. NSEvent-built mouse events for Viber's window, posted to Viber's pid (CGEventPostToPid) and stamped with
+  //     the window-local point (CGEventSetWindowLocation): the real pointer doesn't move and no other app gets them;
+  //  3. "application deactivated" back to Viber, unless the user switched to Viber meanwhile.
+  // Callers pick the point from Viber's window (a chat row) and check the result.
+  requireTrusted(); requireBackground()
+  guard args.count >= 3, let x = Double(args[1]), let y = Double(args[2]) else { fail("usage: click <x> <y> [once]  (screen points)") }
+  guard let w = windowInfo(), let wid = w["id"] as? Int else { fail("Viber has no window.", "no_window") }
+  if (w["onscreen"] as? Bool) == false { fail("Viber's window is minimized or on another Space.", "offscreen") }
+  let wx = w["x"] as! Double, wy = w["y"] as! Double, ww = w["w"] as! Double, wh = w["h"] as! Double
+  guard x >= wx + 1, x <= wx + ww - 1, y >= wy + 1, y <= wy + wh - 1 else { fail("Point is outside Viber's window.", "outside") }
+  typealias SetWindowLocation = @convention(c) (CGEvent, Double, Double) -> Void
+  guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGEventSetWindowLocation") else {
+    fail("This macOS version can't deliver clicks to Viber in the background.", "unsupported")
+  }
+  let setWindowLocation = unsafeBitCast(sym, to: SetWindowLocation.self)
+  let presses = args.count > 3 && args[3] == "once" ? 1 : 2
+  _ = NSApplication.shared
+  func appEvent(_ subtype: Int16) {
+    NSEvent.otherEvent(with: .appKitDefined, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                       windowNumber: wid, context: nil, subtype: subtype, data1: 0, data2: 0)?.cgEvent?.postToPid(pid)
+  }
+  let local = NSPoint(x: x - wx, y: wh - (y - wy)) // AppKit window coordinates, origin bottom-left
+  func mouse(_ type: NSEvent.EventType, _ clicks: Int) {
+    guard let e = NSEvent.mouseEvent(with: type, location: local, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                     windowNumber: wid, context: nil, eventNumber: 0, clickCount: clicks, pressure: type == .leftMouseDown ? 1 : 0)?.cgEvent
+    else { fail("Could not create the click.", "ax_failed") }
+    e.location = CGPoint(x: x, y: y)
+    setWindowLocation(e, x - wx, y - wy) // window-local, origin top-left
+    // kCGMouseEventWindowUnderMousePointer(ThatCanHandleThisEvent): Viber's window, even when it is covered.
+    e.setIntegerValueField(CGEventField(rawValue: 91)!, value: Int64(wid))
+    e.setIntegerValueField(CGEventField(rawValue: 92)!, value: Int64(wid))
+    e.postToPid(pid)
+  }
+  appEvent(1); usleep(120_000)
+  mouse(.mouseMoved, 0); usleep(60_000)
+  for i in 0..<presses {
+    if i > 0 { usleep(450_000) } // apart, so it is never a double-click
+    mouse(.leftMouseDown, 1); usleep(60_000)
+    mouse(.leftMouseUp, 1)
+  }
+  usleep(150_000)
+  let userInViber = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+  if !userInViber { appEvent(2) }
+  usleep(100_000)
+  out(["ok": true, "frontmost": userInViber])
 
 default:
   fail("unknown command \"\(cmd)\"; see the header of viber-ax.swift")

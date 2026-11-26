@@ -206,8 +206,8 @@ const server = new McpServer(
         ? ' WhatsApp: whatsapp_* tools read the WhatsApp Desktop database on this Mac (read-only; only what it has synced).'
         : '') +
       (MESSENGERS.viber
-        ? ' Viber: viber_* tools work with Viber Desktop in the background and only see the chat that is open in Viber; ' +
-          'they cannot switch chats, so ask the user to open the chat in Viber when needed. [Bracketed] lines are read from the screen.'
+        ? ' Viber: viber_* tools work with Viber Desktop in the background and see the chat that is open in Viber; ' +
+          'viber_open_chat switches to another chat by name (without taking focus). [Bracketed] lines are read from the screen.'
         : ''),
   },
 );

@@ -125,10 +125,10 @@ Both work on macOS only, without any login: they read what the desktop apps alre
 - Replies, mentions, captions and media are shown. Locked chats are left out.
 - Needs Node 22.13+ (built-in SQLite). The app that runs telegramcp may need **Full Disk Access** to read WhatsApp's data.
 
-**Viber:** `viber_get_status`, `viber_list_chats`, `viber_scroll_chat_list`, `viber_read_chat`, `viber_scroll_chat`, `viber_search`, `viber_clear_search`, `viber_screenshot`.
+**Viber:** `viber_get_status`, `viber_list_chats`, `viber_scroll_chat_list`, `viber_open_chat`, `viber_read_chat`, `viber_scroll_chat`, `viber_search`, `viber_clear_search`, `viber_screenshot`.
 - Viber has no API for personal accounts, so telegramcp reads Viber Desktop's window through the accessibility API and on-device text recognition, using the bundled helper app (`bin/telegramcp.app`).
-- It works **only in the background**: it never activates Viber, never moves the pointer or types, refuses to change anything while Viber is the active app, and never touches an unsent draft.
-- It can't switch Viber to another chat, so it acts on the chat that's open in Viber.
+- It works **only in the background**: it never activates Viber, never moves your pointer or types, refuses to change anything while Viber is the active app, and never touches an unsent draft.
+- `viber_open_chat` switches Viber to another chat by name, in the background: it finds the chat with Viber's search and clicks it with an event delivered only to Viber, so your pointer, keyboard focus and windows stay as they are. Like opening a chat yourself, it marks its messages as read.
 - Message text is exact. `[Bracketed]` names, times and dates are read from the screen.
 - It needs **Accessibility** and **Screen Recording** for **telegramcp** itself: System Settings lists it as "telegramcp" with its icon, whichever app runs the server (Helmlane, Claude, Cursor, a terminal), so you grant them once. Run `telegramcp permissions`: it adds telegramcp to both lists, opens each page and waits while you turn it on.
 

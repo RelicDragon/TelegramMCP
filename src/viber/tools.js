@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
 import { DATA_DIR } from '../client.js';
-import { ax, layout, parseChatList, parseListBlocks, header, transcript, screenshotFile, permissionHelp, ViberError } from './helper.js';
+import { ax, layout, parseChatList, parseListBlocks, listTargets, header, transcript, screenshotFile, permissionHelp, ViberError } from './helper.js';
 
 // Sending is a separate opt-in from Telegram's write mode: `telegramcp write viber on [--chats "A,B"]`.
 export function viberWriteSettings() {
@@ -62,6 +62,8 @@ function text(s, extra = []) {
   return { content: [{ type: 'text', text: out }, ...extra] };
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 const fmtItem = (i) => {
   const mark = i.side === 'out' ? '  Me ›' : i.side === 'center' ? '  ──' : '‹    ';
   return i.exact ? `${mark} ${i.text.replace(/\n/g, '\n        ')}` : `${mark} [${i.text}]`;
@@ -73,6 +75,58 @@ function sameChat(a, b) {
   return Boolean(x && y && (x === y || (Math.min(x.length, y.length) >= 4 && (x.includes(y) || y.includes(x)))));
 }
 
+// Looser than sameChat for picking a row by name: no accents, and a few OCR slips allowed ("O.S." for "O.Š.").
+const fold = (s) => normTitle(String(s || '').normalize('NFD').replace(/\p{M}/gu, ''));
+function distance(a, b) {
+  const row = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = row[0];
+    row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const keep = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = keep;
+    }
+  }
+  return row[b.length];
+}
+const ELLIPSIS = /\s*(\.\.\.|…)\s*$/;
+// `shown` may be cut short by Viber ("Образовни сис..."): then it only has to start `name`.
+const sameName = (name, shown) => {
+  const x = fold(name), y = fold(String(shown || '').replace(ELLIPSIS, ''));
+  if (!x || !y) return false;
+  if (ELLIPSIS.test(String(shown)) && y.length >= 4 && x.startsWith(y)) return true;
+  return x === y || distance(x, y) <= Math.floor(Math.max(x.length, y.length) / 8);
+};
+
+// Lowercase, no accents, words kept apart: for "starts a word" checks.
+const plain = (s) => String(s || '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+// Rows that `chat` (and the optional `match` text) point to: the name itself (OCR slips and Viber's "…" allowed),
+// or the name followed by text from the row ("Nikola +38160…"). With `partial` (search results only), also names
+// with a word starting with `chat` ("Padel" → "Padel Elite"). Only the first list section with a hit counts, so a
+// conversation wins over a contact or a message result with the same name.
+function pickRows(targets, chat, match, partial = false) {
+  const q = fold(chat), m = fold(match), words = plain(chat);
+  const ok = (t) => !m || fold(`${t.title} ${t.detail}`).includes(m);
+  const tiers = [
+    (t) => sameName(chat, t.title),
+    (t) => fold(t.title).length >= 3 && q.startsWith(fold(t.title)) && fold(`${t.title} ${t.detail}`).includes(q),
+    (t) => partial && words.length >= 3 && ` ${plain(t.title)}`.includes(` ${words}`),
+  ];
+  for (const tier of tiers) {
+    const hits = targets.filter((t) => tier(t) && ok(t));
+    if (!hits.length) continue;
+    const inFirst = hits.filter((t) => t.section === hits[0].section);
+    // The same chat can be listed twice (recent chats and recent searches).
+    const seen = new Set();
+    return inFirst.filter((t) => {
+      const key = fold(t.title) + '|' + fold(t.detail);
+      return !seen.has(key) && seen.add(key);
+    });
+  }
+  return [];
+}
 
 // `tool(name, description, schema, handler, annotations)` comes from server.js.
 export function registerViber(baseTool) {
@@ -157,6 +211,70 @@ export function registerViber(baseTool) {
       return text(out.join('\n'), include_screenshot ? [await image(1400)] : []);
     });
 
+  tool('viber_open_chat',
+    'Viber: Open a chat in Viber by name, so viber_read_chat (and viber_send_message) work on it. Finds it with Viber\'s search ' +
+    '(cleared afterwards), or in the visible chat list. Opening a chat marks its messages as read in Viber, as when the user opens it. ' +
+    'If several chats have that name, it lists them; call again with `match` set to text from the right row (a phone number or the last message).' + BACKGROUND,
+    {
+      chat: z.string().min(1).max(100).describe('Chat or contact name as shown in Viber'),
+      match: z.string().max(100).optional().describe('Text that must also appear in the row, to pick between chats with the same name'),
+    },
+    async ({ chat, match }) => {
+      const first = await snapshot();
+      if (first.tree.frontmost) {
+        throw new ViberError('Viber is the active app right now (the user may be using it). Try again when Viber is in the background.', 'in_use');
+      }
+      const before = header(first.ocr, first.lay);
+      if (before && !match && sameName(chat, before.title)) return text(`"${before.title}"${before.subtitle ? ` (${before.subtitle})` : ''} is already open.`);
+
+      // Search first, so chats with the same name further down the list are seen too; the visible list is the
+      // fallback (Viber's search can miss names with punctuation).
+      let searched = false;
+      const clearSearch = async () => {
+        if (!searched) return;
+        searched = false;
+        const now = await snapshot({ withOcr: false }).catch(() => null);
+        if (now?.lay.search?.value) await ax(['set', SEL.search], { input: '' }).catch(() => {});
+      };
+      await ax(['set', SEL.search], { input: chat });
+      searched = true;
+      await sleep(1500);
+      let snap = await snapshot();
+      let rows = pickRows(listTargets(snap.ocr, snap.lay), chat, match, true);
+      if (!rows.length) {
+        await clearSearch();
+        await sleep(500);
+        snap = await snapshot();
+        rows = pickRows(listTargets(snap.ocr, snap.lay), chat, match);
+      }
+      if (rows.length !== 1) {
+        await clearSearch();
+        if (!rows.length) throw new ViberError(`No chat or contact named "${chat}"${match ? ` with "${match}"` : ''} was found in Viber.`, 'not_found');
+        return text([
+          `Several Viber chats match "${chat}"; nothing was opened. Call viber_open_chat again with \`match\` set to text from the right one:`,
+          ...rows.map((r) => `- ${r.title}${r.detail ? ` — ${r.detail}` : ''}${r.section ? `  [${r.section}]` : ''}`),
+        ].join('\n'));
+      }
+
+      const row = rows[0];
+      let opened = null;
+      for (let attempt = 0; attempt < 2 && !opened; attempt++) {
+        await ax(['click', String(Math.round(row.x)), String(Math.round(row.y)), 'once']);
+        await sleep(700);
+        const after = await snapshot();
+        const h = header(after.ocr, after.lay);
+        if (h && (sameName(h.title, row.title) || sameName(chat, h.title))) opened = h;
+        // A different chat opened (the list moved under the click): don't click again.
+        else if (h && !(before && sameName(before.title, h.title))) {
+          await clearSearch();
+          throw new ViberError(`Viber opened "${h.title}" instead of "${row.title}". Call viber_open_chat again.`, 'wrong_chat');
+        }
+      }
+      await clearSearch();
+      if (!opened) throw new ViberError(`Viber did not open "${row.title}". Try again in a moment.`, 'not_opened');
+      return text(`Opened "${opened.title}"${opened.subtitle ? ` (${opened.subtitle})` : ''}. Call viber_read_chat to read it.`);
+    }, { readOnlyHint: false, destructiveHint: false, openWorldHint: false });
+
   tool('viber_scroll_chat', 'Viber: Scroll the open chat to older or newer messages, or jump to the latest (changes only what Viber shows).' + BACKGROUND,
     {
       direction: z.enum(['older', 'newer', 'latest']).default('older'),
@@ -209,7 +327,6 @@ export function registerViber(baseTool) {
         console.error('write log failed:', err.message);
       }
     };
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
     tool('viber_send_message',
       'Viber: Send a text message AS THE USER into the chat that is open in Viber. Only when the user explicitly asked to send this exact text; ' +
@@ -229,9 +346,9 @@ export function registerViber(baseTool) {
 
         const { ocr, lay } = await snapshot();
         const h = header(ocr, lay);
-        if (!h) throw new ViberError('No chat is open in Viber. Ask the user to open the chat.');
+        if (!h) throw new ViberError('No chat is open in Viber. Open it first with viber_open_chat.');
         if (!sameChat(h.title, chat)) {
-          throw new ViberError(`The chat open in Viber is "${h.title}", not "${chat}". Ask the user to open "${chat}" in Viber; telegramcp can't switch chats without taking over the screen.`);
+          throw new ViberError(`The chat open in Viber is "${h.title}", not "${chat}". Open it first with viber_open_chat.`);
         }
         if (!lay.composer) throw new ViberError('Viber\'s message box was not found.');
         if (lay.composer.value) throw new ViberError('There is an unsent draft in this chat; telegramcp will not overwrite it. Ask the user to send or clear it.');
