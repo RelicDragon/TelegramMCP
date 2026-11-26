@@ -273,7 +273,7 @@ async function writeMode(action, { chats, yes }) {
 function describeViberWrite() {
   const on = process.env.TELEGRAMCP_VIBER_WRITE === 'true';
   const chats = (process.env.TELEGRAMCP_VIBER_WRITE_CHATS || '').split(',').map((c) => c.trim()).filter(Boolean);
-  return on ? pc.red(`ON in ${chats.length ? chats.join(', ') : 'any open chat'}`) : pc.green('off');
+  return on ? pc.red(`ON in ${chats.length ? chats.join(', ') : 'any chat'}`) : pc.green('off');
 }
 
 async function viberWriteMode(action, { chats, yes }) {
@@ -286,11 +286,11 @@ async function viberWriteMode(action, { chats, yes }) {
   if (action !== 'on') throw new Error('Usage: telegramcp write viber [on|off|status] [--chats "A,B"] [-y]');
   const list = (chats ?? '').split(',').map((c) => c.trim()).filter(Boolean);
   p.note([
-    `Agents can ${pc.bold('send messages')} as you into the chat that is open in Viber Desktop`,
+    `Agents can ${pc.bold('send messages')} as you in Viber Desktop, opening the chat in the background`,
     `(${list.length ? list.join(', ') : pc.red('any chat')}). Recipients can't tell an AI wrote it.`,
     'Keep tool approval on: never auto-approve viber_send_message.',
     '',
-    pc.dim('Safeguards: the open chat must match, drafts are never touched, nothing runs while'),
+    pc.dim('Safeguards: sends only after Viber shows that chat, drafts are never touched, nothing runs while'),
     pc.dim(`Viber is the active app, 10 sends/min, every send logged to ${shortPath(WRITE_LOG)}`),
   ].join('\n'), pc.red('High risk'));
   if (!yes && !answer(await p.confirm({ message: 'Enable Viber sending?', initialValue: false }))) return p.log.info('Unchanged.');

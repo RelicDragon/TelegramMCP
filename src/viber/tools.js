@@ -211,31 +211,26 @@ export function registerViber(baseTool) {
       return text(out.join('\n'), include_screenshot ? [await image(1400)] : []);
     });
 
-  tool('viber_open_chat',
-    'Viber: Open a chat in Viber by name, so viber_read_chat (and viber_send_message) work on it. Finds it with Viber\'s search ' +
-    '(cleared afterwards), or in the visible chat list. Opening a chat marks its messages as read in Viber, as when the user opens it. ' +
-    'If several chats have that name, it lists them; call again with `match` set to text from the right row (a phone number or the last message).' + BACKGROUND,
-    {
-      chat: z.string().min(1).max(100).describe('Chat or contact name as shown in Viber'),
-      match: z.string().max(100).optional().describe('Text that must also appear in the row, to pick between chats with the same name'),
-    },
-    async ({ chat, match }) => {
-      const first = await snapshot();
-      if (first.tree.frontmost) {
-        throw new ViberError('Viber is the active app right now (the user may be using it). Try again when Viber is in the background.', 'in_use');
-      }
-      const before = header(first.ocr, first.lay);
-      if (before && !match && sameName(chat, before.title)) return text(`"${before.title}"${before.subtitle ? ` (${before.subtitle})` : ''} is already open.`);
+  // Opens `chat` (optionally the row that also shows `match`) in Viber, in the background. Resolves to
+  // { opened: header, already } or { candidates: rows } when several chats fit; throws when it can't.
+  async function openChat(chat, match) {
+    const first = await snapshot();
+    if (first.tree.frontmost) {
+      throw new ViberError('Viber is the active app right now (the user may be using it). Try again when Viber is in the background.', 'in_use');
+    }
+    const before = header(first.ocr, first.lay);
+    if (before && !match && sameName(chat, before.title)) return { opened: before, already: true };
 
-      // Search first, so chats with the same name further down the list are seen too; the visible list is the
-      // fallback (Viber's search can miss names with punctuation).
-      let searched = false;
-      const clearSearch = async () => {
-        if (!searched) return;
-        searched = false;
-        const now = await snapshot({ withOcr: false }).catch(() => null);
-        if (now?.lay.search?.value) await ax(['set', SEL.search], { input: '' }).catch(() => {});
-      };
+    // Search first, so chats with the same name further down the list are seen too; the visible list is the
+    // fallback (Viber's search can miss names with punctuation).
+    let searched = false;
+    const clearSearch = async () => {
+      if (!searched) return;
+      searched = false;
+      const now = await snapshot({ withOcr: false }).catch(() => null);
+      if (now?.lay.search?.value) await ax(['set', SEL.search], { input: '' }).catch(() => {});
+    };
+    try {
       await ax(['set', SEL.search], { input: chat });
       searched = true;
       await sleep(1500);
@@ -247,32 +242,45 @@ export function registerViber(baseTool) {
         snap = await snapshot();
         rows = pickRows(listTargets(snap.ocr, snap.lay), chat, match);
       }
-      if (rows.length !== 1) {
-        await clearSearch();
-        if (!rows.length) throw new ViberError(`No chat or contact named "${chat}"${match ? ` with "${match}"` : ''} was found in Viber.`, 'not_found');
-        return text([
-          `Several Viber chats match "${chat}"; nothing was opened. Call viber_open_chat again with \`match\` set to text from the right one:`,
-          ...rows.map((r) => `- ${r.title}${r.detail ? ` — ${r.detail}` : ''}${r.section ? `  [${r.section}]` : ''}`),
-        ].join('\n'));
-      }
+      if (!rows.length) throw new ViberError(`No chat or contact named "${chat}"${match ? ` with "${match}"` : ''} was found in Viber.`, 'not_found');
+      if (rows.length > 1) return { candidates: rows };
 
       const row = rows[0];
-      let opened = null;
-      for (let attempt = 0; attempt < 2 && !opened; attempt++) {
+      for (let attempt = 0; attempt < 2; attempt++) {
         await ax(['click', String(Math.round(row.x)), String(Math.round(row.y)), 'once']);
         await sleep(700);
         const after = await snapshot();
         const h = header(after.ocr, after.lay);
-        if (h && (sameName(h.title, row.title) || sameName(chat, h.title))) opened = h;
+        if (h && (sameName(h.title, row.title) || sameName(chat, h.title))) return { opened: h, already: false };
         // A different chat opened (the list moved under the click): don't click again.
-        else if (h && !(before && sameName(before.title, h.title))) {
-          await clearSearch();
-          throw new ViberError(`Viber opened "${h.title}" instead of "${row.title}". Call viber_open_chat again.`, 'wrong_chat');
+        if (h && !(before && sameName(before.title, h.title))) {
+          throw new ViberError(`Viber opened "${h.title}" instead of "${row.title}". Try again.`, 'wrong_chat');
         }
       }
+      throw new ViberError(`Viber did not open "${row.title}". Try again in a moment.`, 'not_opened');
+    } finally {
       await clearSearch();
-      if (!opened) throw new ViberError(`Viber did not open "${row.title}". Try again in a moment.`, 'not_opened');
-      return text(`Opened "${opened.title}"${opened.subtitle ? ` (${opened.subtitle})` : ''}. Call viber_read_chat to read it.`);
+    }
+  }
+
+  const candidatesText = (chat, rows, tool) => [
+    `Several Viber chats match "${chat}"; nothing was done. Call ${tool} again with \`match\` set to text from the right one:`,
+    ...rows.map((r) => `- ${r.title}${r.detail ? ` — ${r.detail}` : ''}${r.section ? `  [${r.section}]` : ''}`),
+  ].join('\n');
+  const titled = (h) => `"${h.title}"${h.subtitle ? ` (${h.subtitle})` : ''}`;
+
+  tool('viber_open_chat',
+    'Viber: Open a chat in Viber by name, so viber_read_chat (and viber_send_message) work on it. Finds it with Viber\'s search ' +
+    '(cleared afterwards), or in the visible chat list. Opening a chat marks its messages as read in Viber, as when the user opens it. ' +
+    'If several chats have that name, it lists them; call again with `match` set to text from the right row (a phone number or the last message).' + BACKGROUND,
+    {
+      chat: z.string().min(1).max(100).describe('Chat or contact name as shown in Viber'),
+      match: z.string().max(100).optional().describe('Text that must also appear in the row, to pick between chats with the same name'),
+    },
+    async ({ chat, match }) => {
+      const r = await openChat(chat, match);
+      if (r.candidates) return text(candidatesText(chat, r.candidates, 'viber_open_chat'));
+      return text(r.already ? `${titled(r.opened)} is already open.` : `Opened ${titled(r.opened)}. Call viber_read_chat to read it.`);
     }, { readOnlyHint: false, destructiveHint: false, openWorldHint: false });
 
   tool('viber_scroll_chat', 'Viber: Scroll the open chat to older or newer messages, or jump to the latest (changes only what Viber shows).' + BACKGROUND,
@@ -328,30 +336,38 @@ export function registerViber(baseTool) {
       }
     };
 
+    const allowed = (name) => !WRITE.chats.length || WRITE.chats.some((c) => sameChat(c, name) || sameName(c, name));
+
     tool('viber_send_message',
-      'Viber: Send a text message AS THE USER into the chat that is open in Viber. Only when the user explicitly asked to send this exact text; ' +
-      'recipients see it as written by the user. `chat` must match the open chat\'s title (see viber_get_status/viber_read_chat), otherwise nothing is sent. ' +
+      'Viber: Send a text message AS THE USER to a Viber chat by name. Only when the user explicitly asked to send this exact text; ' +
+      'recipients see it as written by the user. Opens the chat first if another one is open (in the background, like viber_open_chat), ' +
+      'and sends only after Viber shows that chat. If several chats have that name, nothing is sent and they are listed; call again with `match`. ' +
       'Never touches an unsent draft the user is writing.' + BACKGROUND,
       {
-        chat: z.string().min(1).describe('Title of the chat that should be open in Viber; sending is refused if a different chat is open'),
+        chat: z.string().min(1).max(100).describe('Chat or contact name as shown in Viber'),
         text: z.string().min(1).max(4000),
+        match: z.string().max(100).optional().describe('Text that must also appear in the chat\'s row (a phone number or the last message), to pick between chats with the same name'),
       },
-      async ({ chat, text: msg }) => {
-        if (WRITE.chats.length && !WRITE.chats.some((c) => sameChat(c, chat))) {
+      async ({ chat, text: msg, match }) => {
+        if (!allowed(chat)) {
           throw new ViberError(`Sending to "${chat}" is not allowed (not in the Viber write list). The user can change it with \`telegramcp write viber\`.`);
         }
         const now = Date.now();
         while (recent.length && now - recent[0] > 60_000) recent.shift();
         if (recent.length >= WRITE.perMinute) throw new ViberError(`Send rate limit reached (${WRITE.perMinute}/min).`);
 
-        const { ocr, lay } = await snapshot();
+        const opened = await openChat(chat, match);
+        if (opened.candidates) throw new ViberError(candidatesText(chat, opened.candidates, 'viber_send_message'), 'ambiguous');
+        // Check again what Viber shows right before typing.
+        const { tree, ocr, lay } = await snapshot();
+        if (tree.frontmost) throw new ViberError('Viber became the active app; nothing was sent.', 'in_use');
         const h = header(ocr, lay);
-        if (!h) throw new ViberError('No chat is open in Viber. Open it first with viber_open_chat.');
-        if (!sameChat(h.title, chat)) {
-          throw new ViberError(`The chat open in Viber is "${h.title}", not "${chat}". Open it first with viber_open_chat.`);
+        if (!h || !(sameName(chat, h.title) || sameChat(h.title, chat) || sameName(h.title, opened.opened.title))) {
+          throw new ViberError(`The chat open in Viber is "${h?.title ?? 'none'}", not "${chat}"; nothing was sent.`, 'wrong_chat');
         }
+        if (!allowed(h.title)) throw new ViberError(`Sending to "${h.title}" is not allowed (not in the Viber write list); nothing was sent.`);
         if (!lay.composer) throw new ViberError('Viber\'s message box was not found.');
-        if (lay.composer.value) throw new ViberError('There is an unsent draft in this chat; telegramcp will not overwrite it. Ask the user to send or clear it.');
+        if (lay.composer.value) throw new ViberError(`There is an unsent draft in "${h.title}"; telegramcp will not overwrite it. Ask the user to send or clear it.`);
 
         recent.push(now);
         const typed = await ax(['set', SEL.composer], { input: msg });

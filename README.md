@@ -138,7 +138,7 @@ Sending in Viber is a separate opt-in:
 telegramcp write viber on --chats "Alice,Team chat"
 ```
 
-That adds `viber_send_message`, which checks the open chat's title and refuses if there's a draft. It allows 10 sends a minute, and every send is logged to `writes.log`.
+That adds `viber_send_message`: give it a chat name and the text. It opens the chat in the background if needed, sends only once Viber shows that chat, and refuses if there's a draft or several chats share the name. It allows 10 sends a minute, and every send is logged to `writes.log`.
 
 **With Helmlane:** `telegramcp register helmlane` runs one copy for every app. Then Helmlane's agent is the app that needs the permissions above.
 
