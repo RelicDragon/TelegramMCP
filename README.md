@@ -31,6 +31,10 @@ Equivalent: `npm install -g telegramcp && telegramcp setup`. Latest from GitHub:
 
 Restart your AI clients afterwards.
 
+**Requirements:** Node 20+ (WhatsApp needs Node 22.13+). Telegram works on macOS, Linux and Windows; WhatsApp and Viber need macOS 13+ with their desktop apps installed.
+
+**Only WhatsApp or Viber?** They don't need a Telegram login: install with `npm install -g telegramcp`, then run `telegramcp register` to add it to your agents (and `telegramcp permissions` for Viber). The Telegram tools are still listed and answer that you're not logged in.
+
 ## Managing it later
 
 | Command | What it does |
@@ -46,6 +50,8 @@ Restart your AI clients afterwards.
 | `telegramcp login [--qr \| --code] [--force]` | Log in again |
 | `telegramcp logout` | Revoke this machine's session |
 | `telegramcp write [on\|off\|status]` | **High risk:** let agents send/edit/delete messages as you ([details](#write-mode-high-risk-off-by-default)) |
+| `telegramcp write viber [on\|off\|status] [--chats "A,B (+phone)"]` | **High risk:** let agents send Viber messages as you to the listed chats ([details](#sending-in-viber-high-risk-off-by-default)) |
+| `telegramcp permissions` | macOS: explain and ask for the permissions WhatsApp and Viber need |
 | `telegramcp send-code` / `verify <code> [2fa]` | Non-interactive login, for scripts |
 
 ### Supported agents
@@ -120,27 +126,68 @@ Other env: `TELEGRAMCP_DOWNLOAD_DIR` (default `~/Downloads/telegramcp`), `TELEGR
 
 Both work on macOS only, without any login: they read what the desktop apps already have. Limit which messengers are on with `TELEGRAMCP_MESSENGERS` (default `telegram,whatsapp,viber`). `telegramcp status` shows what's on, and `telegramcp permissions` explains the macOS permissions and asks for them.
 
+As with Telegram, everything the agent reads was written by other people and may try to give it instructions (prompt injection). The tools label it as untrusted, but keep approval on for anything that sends.
+
 **WhatsApp:** `whatsapp_get_me`, `whatsapp_list_chats`, `whatsapp_get_chat`, `whatsapp_read_messages`, `whatsapp_search_messages`, `whatsapp_get_message_context`, `whatsapp_get_unread`, `whatsapp_list_participants`, `whatsapp_list_contacts`, `whatsapp_download_media`.
 - Read-only, from WhatsApp Desktop's database. Only what it has synced is available.
 - Replies, mentions, captions and media are shown. Locked chats are left out.
 - Needs Node 22.13+ (built-in SQLite). The app that runs telegramcp may need **Full Disk Access** to read WhatsApp's data.
 
-**Viber:** `viber_get_status`, `viber_list_chats`, `viber_scroll_chat_list`, `viber_open_chat`, `viber_read_chat`, `viber_scroll_chat`, `viber_search`, `viber_clear_search`, `viber_screenshot`.
+**Viber:** `viber_get_status`, `viber_list_chats`, `viber_scroll_chat_list`, `viber_open_chat`, `viber_read_chat`, `viber_scroll_chat`, `viber_search`, `viber_clear_search`, `viber_screenshot`, and `viber_send_message` when [sending is on](#sending-in-viber-high-risk-off-by-default).
 - Viber has no API for personal accounts, so telegramcp reads Viber Desktop's window through the accessibility API and on-device text recognition, using the bundled helper app (`bin/telegramcp.app`).
 - It works **only in the background**: it never activates Viber, never moves your pointer or types, refuses to change anything while Viber is the active app, and never touches an unsent draft.
 - `viber_open_chat` switches Viber to another chat by name, in the background: it finds the chat with Viber's search and clicks it with an event delivered only to Viber, so your pointer, keyboard focus and windows stay as they are. Like opening a chat yourself, it marks its messages as read.
-- Message text is exact. `[Bracketed]` names, times and dates are read from the screen.
+- Message text is exact. `[Bracketed]` names, times and dates are read from the screen, so small typos are possible.
+- It works with what Viber shows, like a person looking at the window: the visible part of the chat list and of the open chat (the scroll tools move them), one chat at a time. If Viber's window is visible you'll see it scroll and switch chats; that's expected.
+- Keep Viber Desktop running and logged in, with its window open: it can be behind other windows, but not minimized and not on another Space (desktop).
+- `viber_open_chat` and `viber_search` type into Viber's search box and clear it afterwards, replacing a search you had typed there.
+- Calls take turns, so several apps can use it at once. While you're using Viber (it's the active app), anything that changes it is refused; switch to another app and try again.
 - It needs **Accessibility** and **Screen Recording** for **telegramcp** itself: System Settings lists it as "telegramcp" with its icon, whichever app runs the server (Helmlane, Claude, Cursor, a terminal), so you grant them once. Run `telegramcp permissions`: it adds telegramcp to both lists, opens each page and waits while you turn it on.
 
-Sending in Viber is a separate opt-in:
+### Sending in Viber (high risk, off by default)
+
+Sending is a separate opt-in, limited to the chats you list:
 
 ```bash
-telegramcp write viber on --chats "Alice,Team chat"
+telegramcp write viber on --chats "My Notes,Alice,Team chat"
 ```
 
-That adds `viber_send_message`: give it a chat name and the text. It opens the chat in the background if needed, sends only once Viber shows that chat, and refuses if there's a draft or several chats share the name. It allows 10 sends a minute, and every send is logged to `writes.log`.
+That adds `viber_send_message`: an agent gives it a chat name and the text. It opens the chat in the background if another one is open, sends only once Viber shows that chat, never overwrites a draft you're typing, allows 10 sends a minute and logs every send to `writes.log`. Recipients see the message as yours, so keep tool approval on for `viber_send_message`.
 
-**With Helmlane:** `telegramcp register helmlane` runs one copy for every app. Then Helmlane's agent is the app that needs the permissions above.
+**Choosing chats**
+- `--chats` replaces the whole list, so name every chat you want to keep. Without `--chats`, any chat is allowed.
+- A name allows every chat whose title matches it, including longer titles that contain it ("Alex" also allows "Alex Smith").
+- When several chats share a name, pin the one you mean to what its chat header shows under the name, usually the phone number: `--chats "Alex (+381601234567)"`. To find it, open the chat in Viber, or ask an agent to call `viber_open_chat`; its answer shows it, e.g. `Opened "Alex" (+381601234567)`. Sends to the other chats named Alex are refused, and so is a send while the header shows something else (e.g. "Last seen…"); try again in a moment.
+- With chats that share a name, the agent passes `match` (text from the right chat's row, such as its last message) to pick one. Without it, nothing is sent and the matching chats are listed.
+
+**Applying a change**
+- `telegramcp write viber status` shows what is allowed; `telegramcp write viber off` turns sending off.
+- The running server reads the list at start: restart the apps that run telegramcp, or with Helmlane run `helmlane restart`.
+- It's stored in the data-dir `.env`: `TELEGRAMCP_VIBER_WRITE`, `TELEGRAMCP_VIBER_WRITE_CHATS`, and `TELEGRAMCP_VIBER_WRITE_RATE` (sends a minute, default 10).
+- With Helmlane, also share `viber_send_message` in the Helmlane app under Connectors. If a chat app such as claude.ai doesn't show a new tool, reconnect the connector there.
+
+**With Helmlane:** `telegramcp register helmlane` runs one copy for every app, including AI apps in the cloud (ChatGPT, claude.ai). Viber's permissions stay with telegramcp; WhatsApp's Full Disk Access, if needed, goes to Helmlane's agent, since it runs telegramcp. New tools appear in Helmlane after `helmlane restart` and must be shared in the Helmlane app under Connectors before cloud apps can use them.
+
+## Troubleshooting
+
+- **Telegram: "session missing" / "not authorized":** run `telegramcp login`. **AUTH_KEY_DUPLICATED:** the same session was used from two places; run `telegramcp login --force` on this machine (and never copy `session.txt`).
+- **Your agent can't find telegramcp after an update or a Node version switch (nvm):** run `telegramcp refresh`.
+- **WhatsApp tools say "Cannot read …":** give **Full Disk Access** to the app that runs telegramcp (your terminal, AI app or Helmlane), then restart it. WhatsApp tools missing: check `telegramcp status` (Node 22.13+, WhatsApp Desktop installed).
+- **Viber: missing Accessibility or Screen Recording:** run `telegramcp permissions`. If macOS names another app instead of telegramcp, turn on that one.
+- **Viber: "minimized or on another Space" / "has no open window":** open Viber's window on the current desktop; it can stay behind other windows.
+- **Viber: "isn't answering accessibility requests":** wait a minute and retry; if it keeps happening, quit and reopen Viber.
+- **Viber: "the active app right now":** you're using Viber; switch to another app and retry.
+- **Viber: several chats match:** call again with `match` set to text from the right chat's row (its last message or phone number).
+- **A new tool or setting doesn't show up:** restart the app that runs telegramcp (`helmlane restart` with Helmlane). Chat apps that cache tool lists (claude.ai) may need the connector reconnected.
+
+## Uninstall
+
+```bash
+telegramcp unregister --all -y
+npm uninstall -g telegramcp
+```
+
+Your login and settings stay in `~/.config/telegramcp/`; delete that folder too to remove them (run `telegramcp logout` first to end the Telegram session). On macOS, also remove telegramcp from System Settings → Privacy & Security → Accessibility and Screen & System Audio Recording.
 
 ## Development
 
@@ -149,7 +196,9 @@ git clone https://github.com/RelicDragon/TelegramMCP.git && cd TelegramMCP && np
 npm run setup            # same wizard, registered against this checkout
 npm run register:cursor  # register:<agent> for each agent, register:all for all detected
 node test/smoke.js whatsapp_list_chats '{"limit":5}'   # call tools through a real MCP client
-npm run build:native     # rebuild bin/viber-ax (universal) from native/viber-ax.swift; runs before publish
+npm run build:native     # rebuild bin/telegramcp.app (universal viber-ax helper) from native/viber-ax.swift; runs before publish
 ```
 
 `telegramcp update` on a git checkout does `git pull` + `npm install` and then refreshes paths.
+
+`build:native` signs with `$TELEGRAMCP_SIGN_IDENTITY` or the first "Developer ID Application" identity in your keychain. Keeping the same signature keeps the macOS permissions across rebuilds; an ad-hoc signature (no identity) works, but every rebuild needs them granted again. Without the prebuilt app, telegramcp builds one with `swiftc` (Xcode Command Line Tools).

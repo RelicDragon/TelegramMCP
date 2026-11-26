@@ -103,7 +103,7 @@ const sameName = (name, shown) => {
 const plain = (s) => String(s || '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 // Rows that `chat` (and the optional `match` text) point to: the name itself (OCR slips and Viber's "…" allowed),
-// or the name followed by text from the row ("Nikola +38160…"). With `partial` (search results only), also names
+// or the name followed by text from the row ("Alex +38160…"). With `partial` (search results only), also names
 // with a word starting with `chat` ("Padel" → "Padel Elite"). Only the first list section with a hit counts, so a
 // conversation wins over a contact or a message result with the same name.
 function pickRows(targets, chat, match, partial = false) {
@@ -126,6 +126,30 @@ function pickRows(targets, chat, match, partial = false) {
     });
   }
   return [];
+}
+
+// Write-list entries are chat names, optionally pinned to one chat by what its header shows under the name:
+// "Alex (+381601234567)" allows only the Alex whose header shows that number.
+export function parseWriteEntry(entry) {
+  const m = /^(.*?)\s*\(([^()]*)\)\s*$/.exec(entry.trim());
+  return m && m[1] ? { name: m[1], pin: m[2].trim() } : { name: entry.trim(), pin: '' };
+}
+const digits = (s) => String(s || '').replace(/\D/g, '');
+const nameFits = (entryName, name) => sameChat(entryName, name) || sameName(entryName, name);
+// May a send be aimed at `name` at all (before anything is opened)?
+export function writeAllowsName(entries, name) {
+  return !entries.length || entries.some((e) => nameFits(parseWriteEntry(e).name, name));
+}
+// Is the chat Viber shows (header title and subtitle) one the write list allows?
+export function writeAllowsChat(entries, title, subtitle) {
+  if (!entries.length) return true;
+  return entries.some((e) => {
+    const { name, pin } = parseWriteEntry(e);
+    if (!nameFits(name, title)) return false;
+    if (!pin) return true;
+    const want = digits(pin);
+    return want.length >= 6 ? digits(subtitle).includes(want) : fold(subtitle).includes(fold(pin));
+  });
 }
 
 // `tool(name, description, schema, handler, annotations)` comes from server.js.
@@ -336,7 +360,6 @@ export function registerViber(baseTool) {
       }
     };
 
-    const allowed = (name) => !WRITE.chats.length || WRITE.chats.some((c) => sameChat(c, name) || sameName(c, name));
 
     tool('viber_send_message',
       'Viber: Send a text message AS THE USER to a Viber chat by name. Only when the user explicitly asked to send this exact text; ' +
@@ -349,7 +372,7 @@ export function registerViber(baseTool) {
         match: z.string().max(100).optional().describe('Text that must also appear in the chat\'s row (a phone number or the last message), to pick between chats with the same name'),
       },
       async ({ chat, text: msg, match }) => {
-        if (!allowed(chat)) {
+        if (!writeAllowsName(WRITE.chats, chat)) {
           throw new ViberError(`Sending to "${chat}" is not allowed (not in the Viber write list). The user can change it with \`telegramcp write viber\`.`);
         }
         const now = Date.now();
@@ -365,7 +388,10 @@ export function registerViber(baseTool) {
         if (!h || !(sameName(chat, h.title) || sameChat(h.title, chat) || sameName(h.title, opened.opened.title))) {
           throw new ViberError(`The chat open in Viber is "${h?.title ?? 'none'}", not "${chat}"; nothing was sent.`, 'wrong_chat');
         }
-        if (!allowed(h.title)) throw new ViberError(`Sending to "${h.title}" is not allowed (not in the Viber write list); nothing was sent.`);
+        if (!writeAllowsChat(WRITE.chats, h.title, h.subtitle)) {
+          throw new ViberError(`Sending to ${titled(h)} is not allowed (not in the Viber write list); nothing was sent. ` +
+            'If several chats share this name, call again with `match` to pick the allowed one.', 'not_allowed');
+        }
         if (!lay.composer) throw new ViberError('Viber\'s message box was not found.');
         if (lay.composer.value) throw new ViberError(`There is an unsent draft in "${h.title}"; telegramcp will not overwrite it. Ask the user to send or clear it.`);
 

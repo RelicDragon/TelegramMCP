@@ -283,7 +283,7 @@ async function viberWriteMode(action, { chats, yes }) {
     p.log.success('Viber sending off.');
     return p.log.info('Restart your AI clients to apply.');
   }
-  if (action !== 'on') throw new Error('Usage: telegramcp write viber [on|off|status] [--chats "A,B"] [-y]');
+  if (action !== 'on') throw new Error('Usage: telegramcp write viber [on|off|status] [--chats "A,B (+phone)"] [-y]');
   const list = (chats ?? '').split(',').map((c) => c.trim()).filter(Boolean);
   p.note([
     `Agents can ${pc.bold('send messages')} as you in Viber Desktop, opening the chat in the background`,
