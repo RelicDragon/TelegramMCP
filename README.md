@@ -94,8 +94,13 @@ Any other MCP client: run `telegramcp` with no arguments (stdio), or
 ## Tools exposed to the agent
 
 Read-only: `get_me`, `list_chats`, `get_chat`, `read_messages`, `search_messages` (per chat or global),
-`get_message_context`, `get_unread`, `list_topics`, `list_participants`, `list_contacts`, `download_media`.
+`get_message_context`, `get_unread`, `get_poll`, `list_topics`, `list_participants`, `list_contacts`, `download_media`.
 Reading never marks messages as read.
+
+Polls show their type, vote counts and your vote inline in messages. `get_poll` reads one poll in full: quiz or regular,
+anonymous or public, single or multiple choice, open or closed, percentages, a quiz's correct answer and explanation,
+and for public polls who voted for which option. Without `message_id` it lists the recent polls in a chat.
+Telegram only shows counts and voters once you have voted, or once the poll is closed.
 
 ### Write mode (high risk, off by default)
 

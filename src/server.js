@@ -115,16 +115,44 @@ function describeMedia(m) {
     return `[file ${file || media.document.mimeType}]`;
   }
   if (media instanceof Api.MessageMediaWebPage) return media.webpage?.url ? `[link ${media.webpage.url}]` : '';
-  if (media instanceof Api.MessageMediaPoll) {
-    const q = media.poll.question?.text ?? media.poll.question;
-    return `[poll "${q}": ${media.poll.answers.map((a) => a.text?.text ?? a.text).join(' / ')}]`;
-  }
+  if (media instanceof Api.MessageMediaPoll) return describePoll(media);
   if (media instanceof Api.MessageMediaGeo || media instanceof Api.MessageMediaGeoLive) {
     return `[location ${media.geo?.lat},${media.geo?.long}]`;
   }
   if (media instanceof Api.MessageMediaVenue) return `[venue ${media.title}, ${media.address}]`;
   if (media instanceof Api.MessageMediaContact) return `[contact ${media.firstName} ${media.lastName} ${media.phoneNumber}]`;
   return `[${media.className.replace('MessageMedia', '').toLowerCase()}]`;
+}
+
+// ---------- polls ----------
+
+const twe = (t) => t?.text ?? t ?? '';
+const sameOption = (a, b) => Buffer.from(a).equals(Buffer.from(b));
+
+function pollKind(poll) {
+  return [
+    poll.quiz ? 'quiz' : 'poll',
+    poll.publicVoters ? 'public' : 'anonymous',
+    poll.multipleChoice ? 'multiple choice' : null,
+    poll.closed ? 'closed' : poll.closeDate ? `closes ${fmtDate(poll.closeDate)}` : null,
+  ].filter(Boolean).join(', ');
+}
+
+// Per-answer view of a poll: text, votes (null when results are hidden), my choice, correct answer.
+function pollAnswers(poll, results) {
+  const counts = results?.results;
+  return poll.answers.map((a, i) => {
+    const r = counts?.find((x) => sameOption(x.option, a.option));
+    return { n: i + 1, option: a.option, text: twe(a.text), voters: r ? r.voters : null, chosen: !!r?.chosen, correct: !!r?.correct };
+  });
+}
+
+function describePoll(media) {
+  const { poll, results } = media;
+  const answers = pollAnswers(poll, results).map((a) =>
+    a.text + (a.voters != null ? ` ${a.voters}` : '') + (a.chosen ? ' ✓me' : '') + (a.correct ? ' (correct)' : ''));
+  const total = results?.totalVoters != null ? ` — ${results.totalVoters} voted` : '';
+  return `[${pollKind(poll)} "${twe(poll.question)}": ${answers.join(' / ')}${total}]`;
 }
 
 function fmtMessage(m, { withChat = false } = {}) {
@@ -346,6 +374,100 @@ tool('get_unread', 'Summarise unread messages: for each chat with unread message
       blocks.push(`== ${d.title} [${chatId(d.entity)}] unread=${d.unreadCount}\n${msgs.map((m) => fmtMessage(m)).join('\n')}`);
     }
     return text(blocks.join('\n\n') || 'No unread messages.');
+  });
+
+tool('get_poll',
+  'Read a poll in full: type (regular/quiz, anonymous/public, single/multiple choice, open/closed), vote counts and percentages, ' +
+  'the user\'s own vote, the correct answer and explanation of a quiz, and for public (non-anonymous) polls who voted for which option. ' +
+  'Without message_id lists the polls among the chat\'s recent messages.',
+  {
+    chat: chatArg,
+    message_id: z.number().int().optional().describe('Message id of the poll; omit to list recent polls in the chat'),
+    voters_limit: z.number().int().min(0).max(2000).default(100).describe('Max voters listed per option (public polls); 0 = counts only'),
+    scan: z.number().int().min(1).max(5000).default(1000).describe('Without message_id: how many recent messages to scan for polls'),
+    topic_id: z.number().int().optional().describe('Without message_id: forum topic id to scan'),
+  },
+  async ({ chat, message_id, voters_limit, scan, topic_id }) => {
+    const c = await tg();
+    const e = await resolveChat(chat);
+
+    if (message_id == null) {
+      const polls = [];
+      for await (const m of c.iterMessages(e, { limit: scan, replyTo: topic_id })) {
+        if (m.media instanceof Api.MessageMediaPoll) polls.push(m);
+      }
+      return text(polls.length
+        ? `${polls.length} poll(s) in the last ${scan} messages of ${displayName(e)} (get_poll with message_id for details):\n` +
+          polls.reverse().map((m) => fmtMessage(m)).join('\n')
+        : `No polls in the last ${scan} messages of ${displayName(e)}.`);
+    }
+
+    const [m] = await c.getMessages(e, { ids: [message_id] });
+    if (!m) throw new Error(`Message #${message_id} not found`);
+    if (!(m.media instanceof Api.MessageMediaPoll)) throw new Error(`Message #${message_id} is not a poll`);
+    let { poll, results } = m.media;
+
+    // Ask Telegram for fresh results; the copy inside the message can be stale.
+    try {
+      const upd = await c.invoke(new Api.messages.GetPollResults({ peer: e, msgId: message_id }));
+      const fresh = (upd.updates ?? []).find((u) => u instanceof Api.UpdateMessagePoll && u.pollId.equals(poll.id));
+      if (fresh?.poll) poll = fresh.poll;
+      if (fresh?.results) results = fresh.results;
+    } catch { /* keep the cached results */ }
+
+    const answers = pollAnswers(poll, results);
+    const total = results?.totalVoters;
+    const out = [
+      `Poll #${m.id} in ${displayName(e)} [${chatId(e)}] by ${m.out ? 'Me' : displayName(m.sender ?? m.chat)}, ${fmtDate(m.date)}`,
+      `Question: ${twe(poll.question)}`,
+      `Type: ${poll.quiz ? 'quiz' : 'regular poll'}; ${poll.publicVoters ? 'public (voters visible)' : 'anonymous'}; ` +
+        `${poll.multipleChoice ? 'multiple answers allowed' : 'single answer'}; ` +
+        (poll.closed ? 'closed' : poll.closeDate ? `open, closes ${fmtDate(poll.closeDate)}` : 'open') +
+        (poll.closePeriod ? ` (open for ${poll.closePeriod}s)` : ''),
+      `Total voters: ${total ?? 'hidden'}`,
+    ];
+    const hidden = answers.every((a) => a.voters == null);
+    for (const a of answers) {
+      const pct = a.voters != null && total ? ` (${Math.round((a.voters / total) * 100)}%)` : '';
+      out.push(`${a.n}. ${a.text}${a.voters != null ? ` — ${a.voters}${pct}` : ''}${a.chosen ? '  ✓ my vote' : ''}${a.correct ? '  ✔ correct' : ''}`);
+    }
+    if (hidden) out.push('(Option counts are hidden until the user votes or the poll is closed.)');
+    if (!answers.some((a) => a.chosen) && !hidden) out.push('The user has not voted.');
+    if (results?.solution) out.push(`Explanation: ${results.solution}`);
+
+    if (poll.publicVoters && voters_limit > 0) {
+      out.push('', 'Voters:');
+      for (const a of answers) {
+        if (a.voters === 0) { out.push(`${a.n}. ${a.text}: nobody`); continue; }
+        const names = [];
+        let offset;
+        let error;
+        try {
+          while (names.length < voters_limit) {
+            const res = await c.invoke(new Api.messages.GetPollVotes({
+              peer: e, id: message_id, option: a.option, offset, limit: Math.min(50, voters_limit - names.length),
+            }));
+            const byId = new Map([...res.users, ...res.chats].map((x) => [String(utils.getPeerId(x)), x]));
+            for (const v of res.votes) {
+              const who = byId.get(String(utils.getPeerId(v.peer)));
+              names.push(`${who ? displayName(who) : 'Unknown'} [${utils.getPeerId(v.peer)}] ${fmtDate(v.date)}`);
+            }
+            if (!res.nextOffset || !res.votes.length) break;
+            offset = res.nextOffset;
+          }
+        } catch (err) {
+          error = err.errorMessage === 'POLL_VOTE_REQUIRED'
+            ? 'voters are visible only after the user votes in this poll'
+            : err.errorMessage || err.message;
+        }
+        if (error) { out.push(`${a.n}. ${a.text}: (${error})`); if (/vote/.test(error)) break; continue; }
+        const more = a.voters != null && a.voters > names.length ? ` …and ${a.voters - names.length} more` : '';
+        out.push(`${a.n}. ${a.text} (${a.voters ?? names.length}):`, ...names.map((n) => `   ${n}`), ...(more ? [`  ${more}`] : []));
+      }
+    } else if (!poll.publicVoters) {
+      out.push('Anonymous poll: Telegram does not reveal who voted.');
+    }
+    return text(out.join('\n'));
   });
 
 tool('list_topics', 'List topics of a forum supergroup (topic ids can be passed to read_messages.topic_id).',
